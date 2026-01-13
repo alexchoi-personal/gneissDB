@@ -2,7 +2,7 @@
 
 ## Summary
 
-GneissDB has a working core but several features are stubbed, incomplete, or missing entirely. This document categorizes all unimplemented functionality.
+This document tracks implemented vs unimplemented features in GneissDB.
 
 ---
 
@@ -19,6 +19,7 @@ GneissDB has a working core but several features are stubbed, incomplete, or mis
 - [x] Memtable (crossbeam-skiplist based)
 - [x] SSTable format (blocks, index, bloom filter, footer)
 - [x] SSTable reader with mmap
+- [x] SSTable iterator for sequential access
 - [x] Block cache (LRU-ish)
 - [x] Table cache
 
@@ -26,67 +27,31 @@ GneissDB has a working core but several features are stubbed, incomplete, or mis
 - [x] WAL writer with CRC checksums
 - [x] WAL reader for recovery
 - [x] Crash recovery from WAL
+- [x] Manifest persistence (MANIFEST and CURRENT files)
+
+### Compaction
+- [x] Compaction merge logic (multi-way merge)
+- [x] Duplicate key elimination
+- [x] Deletion tombstone handling
+- [x] File cleanup (WAL and SST files)
 
 ---
 
 ## ❌ NOT IMPLEMENTED
 
-### 1. Compaction (STUBBED - Critical)
-**Location:** `src/compaction/level.rs`
+### 1. Manifest Integration with DB (PARTIAL)
+**Location:** `src/db.rs`
 
-The compaction logic is scaffolded but **does not actually merge data**:
-```rust
-// Current code creates empty output, doesn't read/merge input files
-let _heap: BinaryHeap<MergeEntry> = BinaryHeap::new();  // Never used!
-let mut iterators: Vec<_> = Vec::new();
-for (idx, _reader) in readers.iter().enumerate() {
-    iterators.push(idx);  // Just pushes indices, doesn't iterate
-}
-let metadata = builder.finish().await?;  // Writes empty SSTable
-```
+The manifest persistence code exists but is not yet integrated with DbInner:
+- VersionSet::recover() is implemented but not called from DbInner::open()
+- VersionSet::log_and_apply() is implemented but not used for edits
 
 **Missing:**
-- SSTable iterator for reading entries
-- Multi-way merge algorithm
-- Duplicate key elimination (keeping newest)
-- Deletion tombstone handling
-- Background compaction thread
+- Call VersionSet::recover() on DB open
+- Call log_and_apply() instead of apply() for persistence
+- Background compaction integration
 
-### 2. Manifest Persistence (NOT IMPLEMENTED)
-**Location:** `src/manifest/edit.rs`
-
-Version edits can be encoded/decoded but are **never written to disk**:
-```rust
-// These methods exist but are never called:
-pub(crate) fn encode(&self) -> Bytes { ... }
-pub(crate) fn decode(data: &[u8]) -> Option<Self> { ... }
-```
-
-**Missing:**
-- MANIFEST file writing
-- MANIFEST file reading on startup
-- CURRENT file pointer
-- Version recovery after restart
-
-**Impact:** After restart, GneissDB doesn't know which SST files exist or their levels.
-
-### 3. SSTable Iterator (NOT IMPLEMENTED)
-**Location:** `src/sstable/reader.rs`
-
-Only point lookups work. No way to iterate through all entries:
-```rust
-// Block::iter() exists but is never used
-// SstableReader has no iter() method
-```
-
-**Missing:**
-- `SstableReader::iter()` - iterate all entries
-- `SstableReader::seek()` - seek to key
-- Merging iterator for multi-SSTable scans
-
-**Impact:** Range scans only work on memtable, compaction can't read SSTable contents.
-
-### 4. Range Scan on SSTables (NOT IMPLEMENTED)
+### 2. Range Scan on SSTables (NOT IMPLEMENTED)
 **Location:** `src/db.rs:268`
 
 ```rust
@@ -102,26 +67,6 @@ pub(crate) fn scan(&self, start: &[u8], end: &[u8], limit: usize) -> Vec<(Bytes,
 - Scan L0 SSTables
 - Scan leveled SSTables with key range filtering
 - Merge results across all sources
-
-### 5. Old WAL Cleanup (NOT IMPLEMENTED)
-**Location:** `src/db.rs`
-
-WAL files are created but never deleted:
-```rust
-// After flush, a new WAL is created but old one isn't removed
-let wal_path = self.path.join(format!("{:06}.wal", ...));
-let wal_file = self.fs.create_file(&wal_path).await?;
-// Missing: delete old WAL after successful flush
-```
-
-### 6. Old SSTable Cleanup (NOT IMPLEMENTED)
-
-After compaction, input SSTables are logically deleted from the version but **files remain on disk**:
-```rust
-// VersionEdit tracks deleted files but doesn't delete them
-edit.delete_file(task.level, file.file_number);
-// Missing: actual file deletion
-```
 
 ### 7. Snapshots (NOT IMPLEMENTED)
 **Location:** `src/options.rs`
