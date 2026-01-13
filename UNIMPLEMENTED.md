@@ -39,19 +39,7 @@ This document tracks implemented vs unimplemented features in GneissDB.
 
 ## ❌ NOT IMPLEMENTED
 
-### 1. Manifest Integration with DB (PARTIAL)
-**Location:** `src/db.rs`
-
-The manifest persistence code exists but is not yet integrated with DbInner:
-- VersionSet::recover() is implemented but not called from DbInner::open()
-- VersionSet::log_and_apply() is implemented but not used for edits
-
-**Missing:**
-- Call VersionSet::recover() on DB open
-- Call log_and_apply() instead of apply() for persistence
-- Background compaction integration
-
-### 2. Range Scan on SSTables (NOT IMPLEMENTED)
+### 1. Range Scan on SSTables (NOT IMPLEMENTED)
 **Location:** `src/db.rs:268`
 
 ```rust
