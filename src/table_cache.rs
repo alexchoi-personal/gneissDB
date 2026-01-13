@@ -59,6 +59,14 @@ impl TableCache {
         self.cache.remove(&file_number);
     }
 
+    pub(crate) fn evict_by_path(&self, path: &std::path::Path) {
+        if let Some(stem) = path.file_stem() {
+            if let Ok(file_number) = stem.to_string_lossy().parse::<u64>() {
+                self.cache.remove(&file_number);
+            }
+        }
+    }
+
     #[allow(dead_code)]
     pub(crate) fn clear(&self) {
         self.cache.clear();

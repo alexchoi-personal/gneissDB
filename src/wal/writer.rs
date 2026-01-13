@@ -30,7 +30,6 @@ impl WalWriter {
         }
     }
 
-    #[allow(dead_code)]
     pub(crate) fn path(&self) -> &PathBuf {
         &self.path
     }
