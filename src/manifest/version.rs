@@ -1,6 +1,8 @@
-use crate::manifest::VersionEdit;
+use crate::error::Result;
+use crate::manifest::{read_current, write_current, ManifestReader, ManifestWriter, VersionEdit};
 use bytes::Bytes;
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 #[derive(Clone, Debug)]
@@ -37,26 +39,113 @@ impl Version {
             .map(|files| files.iter().map(|f| f.file_size).sum())
             .unwrap_or(0)
     }
+
+    #[allow(dead_code)]
+    pub(crate) fn all_file_numbers(&self) -> Vec<u64> {
+        self.files
+            .iter()
+            .flat_map(|level| level.iter().map(|f| f.file_number))
+            .collect()
+    }
 }
 
 pub(crate) struct VersionSet {
+    #[allow(dead_code)]
+    db_path: std::path::PathBuf,
     current: Version,
     next_file_number: AtomicU64,
     last_sequence: AtomicU64,
     max_levels: usize,
     #[allow(dead_code)]
     manifest_file_number: u64,
+    #[allow(dead_code)]
+    manifest_writer: Option<ManifestWriter>,
 }
 
 impl VersionSet {
     pub(crate) fn new(max_levels: usize) -> Self {
         Self {
+            db_path: std::path::PathBuf::new(),
             current: Version::new(max_levels),
             next_file_number: AtomicU64::new(1),
             last_sequence: AtomicU64::new(0),
             max_levels,
             manifest_file_number: 1,
+            manifest_writer: None,
         }
+    }
+
+    #[allow(dead_code)]
+    pub(crate) async fn recover(db_path: &Path, max_levels: usize) -> Result<Self> {
+        let mut vs = Self {
+            db_path: db_path.to_path_buf(),
+            current: Version::new(max_levels),
+            next_file_number: AtomicU64::new(1),
+            last_sequence: AtomicU64::new(0),
+            max_levels,
+            manifest_file_number: 1,
+            manifest_writer: None,
+        };
+
+        if let Some(manifest_name) = read_current(db_path).await? {
+            let manifest_path = db_path.join(&manifest_name);
+            if manifest_path.exists() {
+                let mut reader = ManifestReader::open(&manifest_path).await?;
+                let edits = reader.read_all().await?;
+
+                for edit in edits {
+                    vs.apply_internal(&edit);
+                }
+
+                if let Some(num_str) = manifest_name.strip_prefix("MANIFEST-") {
+                    if let Ok(num) = num_str.parse::<u64>() {
+                        vs.manifest_file_number = num;
+                    }
+                }
+
+                let writer = ManifestWriter::open_append(&manifest_path).await?;
+                vs.manifest_writer = Some(writer);
+            }
+        }
+
+        if vs.manifest_writer.is_none() {
+            vs.create_new_manifest().await?;
+        }
+
+        Ok(vs)
+    }
+
+    #[allow(dead_code)]
+    async fn create_new_manifest(&mut self) -> Result<()> {
+        self.manifest_file_number = self.next_file_number.fetch_add(1, Ordering::SeqCst);
+        let manifest_name = format!("MANIFEST-{:06}", self.manifest_file_number);
+        let manifest_path = self.db_path.join(&manifest_name);
+
+        let mut writer = ManifestWriter::create(&manifest_path).await?;
+
+        let mut snapshot_edit = VersionEdit::new();
+        snapshot_edit.set_next_file_number(self.next_file_number.load(Ordering::SeqCst));
+        snapshot_edit.set_last_sequence(self.last_sequence.load(Ordering::SeqCst));
+
+        for (level, files) in self.current.files.iter().enumerate() {
+            for file in files {
+                snapshot_edit.add_file(
+                    level,
+                    file.file_number,
+                    file.file_size,
+                    file.min_key.clone(),
+                    file.max_key.clone(),
+                );
+            }
+        }
+
+        writer.write_edit(&snapshot_edit).await?;
+        writer.sync().await?;
+
+        write_current(&self.db_path, &manifest_name).await?;
+
+        self.manifest_writer = Some(writer);
+        Ok(())
     }
 
     pub(crate) fn current(&self) -> &Version {
@@ -65,6 +154,11 @@ impl VersionSet {
 
     pub(crate) fn next_file_number(&self) -> u64 {
         self.next_file_number.fetch_add(1, Ordering::SeqCst)
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn peek_file_number(&self) -> u64 {
+        self.next_file_number.load(Ordering::SeqCst)
     }
 
     pub(crate) fn last_sequence(&self) -> u64 {
@@ -79,7 +173,22 @@ impl VersionSet {
         self.last_sequence.fetch_add(1, Ordering::SeqCst)
     }
 
+    #[allow(dead_code)]
+    pub(crate) async fn log_and_apply(&mut self, edit: &VersionEdit) -> Result<()> {
+        if let Some(ref mut writer) = self.manifest_writer {
+            writer.write_edit(edit).await?;
+            writer.sync().await?;
+        }
+
+        self.apply_internal(edit);
+        Ok(())
+    }
+
     pub(crate) fn apply(&mut self, edit: &VersionEdit) {
+        self.apply_internal(edit);
+    }
+
+    fn apply_internal(&mut self, edit: &VersionEdit) {
         if let Some(num) = edit.next_file_number {
             self.next_file_number.store(num, Ordering::SeqCst);
         }
