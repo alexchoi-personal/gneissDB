@@ -5,7 +5,7 @@ use crate::fs::{FileSystem, RealFileSystem};
 #[cfg(all(target_os = "linux", feature = "io_uring"))]
 use crate::fs_iouring::IoUringFileSystem;
 use crate::group_commit::{GroupCommitQueue, WriteOp};
-use crate::manifest::{VersionEdit, VersionSet};
+use crate::manifest::{write_current, ManifestWriter, VersionEdit, VersionSet};
 use crate::memtable::{ImmutableMemtable, LookupResult, Memtable};
 use crate::options::{IoEngine, Options, ReadOptions, WriteOptions};
 use crate::sstable::SstableBuilder;
@@ -25,6 +25,7 @@ pub(crate) struct DbInner {
     memtable: Arc<RwLock<Arc<Memtable>>>,
     immutable_memtables: Arc<Mutex<VecDeque<ImmutableMemtable>>>,
     version_set: Arc<RwLock<VersionSet>>,
+    manifest: Arc<tokio::sync::Mutex<ManifestWriter>>,
     wal: Arc<tokio::sync::Mutex<Option<WalWriter>>>,
     group_commit: Option<GroupCommitQueue>,
     cache: Arc<BlockCache>,
@@ -55,20 +56,26 @@ impl DbInner {
         }
 
         let cache = BlockCache::new(options.block_cache_size);
-        let version_set = VersionSet::new(options.max_levels);
 
-        let entries = fs.read_dir(path).await?;
-        let mut max_file_number = 0u64;
-        for entry in &entries {
-            if let Some(stem) = entry.file_stem() {
-                if let Ok(num) = stem.to_string_lossy().parse::<u64>() {
-                    max_file_number = max_file_number.max(num);
-                }
-            }
-        }
-        for _ in 0..=max_file_number {
-            version_set.next_file_number();
-        }
+        let (version_set, existing_manifest) =
+            VersionSet::recover(path, options.max_levels).await?;
+
+        let manifest_writer = if let Some(manifest_name) = existing_manifest {
+            let manifest_path = path.join(&manifest_name);
+            ManifestWriter::open_append(&manifest_path).await?
+        } else {
+            let manifest_number = version_set.peek_file_number();
+            let manifest_name = format!("MANIFEST-{:06}", manifest_number);
+            let manifest_path = path.join(&manifest_name);
+            let mut writer = ManifestWriter::create(&manifest_path).await?;
+
+            let snapshot = version_set.encode_snapshot();
+            writer.write_edit(&snapshot).await?;
+            writer.sync().await?;
+
+            write_current(path, &manifest_name).await?;
+            writer
+        };
 
         let compaction_picker = CompactionPicker::new(
             options.l0_compaction_trigger,
@@ -93,6 +100,7 @@ impl DbInner {
             memtable: Arc::new(RwLock::new(Arc::new(Memtable::new(4 * 1024 * 1024)))),
             immutable_memtables: Arc::new(Mutex::new(VecDeque::new())),
             version_set: Arc::new(RwLock::new(version_set)),
+            manifest: Arc::new(tokio::sync::Mutex::new(manifest_writer)),
             wal: wal.clone(),
             group_commit: None,
             cache,
@@ -250,7 +258,18 @@ impl DbInner {
 
         for level in 1..self.options.max_levels {
             for file in version.get_files_at_level(level) {
-                if key >= file.min_key.as_ref() && key <= file.max_key.as_ref() {
+                let min_user_key = if file.min_key.len() >= 9 {
+                    &file.min_key[..file.min_key.len() - 9]
+                } else {
+                    file.min_key.as_ref()
+                };
+                let max_user_key = if file.max_key.len() >= 9 {
+                    &file.max_key[..file.max_key.len() - 9]
+                } else {
+                    file.max_key.as_ref()
+                };
+
+                if key >= min_user_key && key <= max_user_key {
                     if let Ok(reader) = self.table_cache.get(file.file_number).await {
                         match reader.get(key, sequence).await? {
                             LookupResult::Found(value) => return Ok(Some(value)),
@@ -569,6 +588,7 @@ impl DbInner {
         let metadata = builder.finish().await?;
 
         let mut edit = VersionEdit::new();
+        edit.set_last_sequence(self.version_set.read().last_sequence());
         if metadata.entry_count > 0 {
             edit.add_file(
                 0,
@@ -579,9 +599,7 @@ impl DbInner {
             );
         }
 
-        {
-            self.version_set.write().apply(&edit);
-        }
+        self.log_and_apply(&edit).await?;
 
         {
             self.immutable_memtables.lock().pop_front();
@@ -628,8 +646,9 @@ impl DbInner {
                 self.options.bloom_bits_per_key,
             );
 
-            let edit = compactor.compact(&task, file_number).await?;
-            self.version_set.write().apply(&edit);
+            let mut edit = compactor.compact(&task, file_number).await?;
+            edit.set_last_sequence(self.version_set.read().last_sequence());
+            self.log_and_apply(&edit).await?;
 
             for sst_path in files_to_delete {
                 self.table_cache.evict_by_path(&sst_path);
@@ -639,6 +658,17 @@ impl DbInner {
             }
         }
 
+        Ok(())
+    }
+
+    async fn log_and_apply(&self, edit: &VersionEdit) -> Result<()> {
+        {
+            let mut manifest = self.manifest.lock().await;
+            manifest.write_edit(edit).await?;
+            manifest.sync().await?;
+        }
+
+        self.version_set.write().apply(edit);
         Ok(())
     }
 
@@ -965,5 +995,113 @@ mod tests {
         assert!(value.is_none());
 
         db.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_db_manifest_recovery() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().to_path_buf();
+
+        {
+            let options = Options::default().memtable_size(256);
+            let db = DbInner::open(&path, options).await.unwrap();
+
+            for i in 0..50 {
+                db.put(
+                    Bytes::from(format!("key{:04}", i)),
+                    Bytes::from(format!("value{:04}", i)),
+                    WriteOptions::default(),
+                )
+                .await
+                .unwrap();
+            }
+
+            db.flush().await.unwrap();
+
+            let l0_files = db.version_set.read().current().num_files_at_level(0);
+            assert!(l0_files > 0, "Should have SST files after flush");
+
+            db.close().await.unwrap();
+        }
+
+        {
+            let options = Options::default().memtable_size(256);
+            let db = DbInner::open(&path, options).await.unwrap();
+
+            let l0_files = db.version_set.read().current().num_files_at_level(0);
+            assert!(l0_files > 0, "Should recover SST files from manifest");
+
+            for i in 0..50 {
+                let key = format!("key{:04}", i);
+                let expected = format!("value{:04}", i);
+                let value = db
+                    .get(key.as_bytes(), ReadOptions::default())
+                    .await
+                    .unwrap();
+                assert!(value.is_some(), "Key {} should exist after recovery", key);
+                assert_eq!(
+                    value.unwrap().as_ref(),
+                    expected.as_bytes(),
+                    "Value mismatch for key {}",
+                    key
+                );
+            }
+
+            db.close().await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn test_db_manifest_recovery_after_compaction() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().to_path_buf();
+
+        {
+            let options = Options::default().memtable_size(256);
+            let db = DbInner::open(&path, options).await.unwrap();
+
+            for batch in 0..3 {
+                for i in 0..30 {
+                    db.put(
+                        Bytes::from(format!("key{:04}", batch * 30 + i)),
+                        Bytes::from(format!("value{:04}", batch * 30 + i)),
+                        WriteOptions::default(),
+                    )
+                    .await
+                    .unwrap();
+                }
+                db.flush().await.unwrap();
+            }
+
+            db.compact().await.unwrap();
+            db.close().await.unwrap();
+        }
+
+        {
+            let options = Options::default().memtable_size(256);
+            let db = DbInner::open(&path, options).await.unwrap();
+
+            for i in 0..90 {
+                let key = format!("key{:04}", i);
+                let expected = format!("value{:04}", i);
+                let value = db
+                    .get(key.as_bytes(), ReadOptions::default())
+                    .await
+                    .unwrap();
+                assert!(
+                    value.is_some(),
+                    "Key {} should exist after compaction recovery",
+                    key
+                );
+                assert_eq!(
+                    value.unwrap().as_ref(),
+                    expected.as_bytes(),
+                    "Value mismatch for key {}",
+                    key
+                );
+            }
+
+            db.close().await.unwrap();
+        }
     }
 }
