@@ -39,10 +39,11 @@ async fn main() {
     println!("\n=== Read Profiling ({} ops) ===\n", count);
 
     let start = Instant::now();
-    let db = Db::open(dir.path(), Options::default())
-        .await
-        .unwrap();
-    println!("db_open (recovery): {:.3}ms", start.elapsed().as_secs_f64() * 1000.0);
+    let db = Db::open(dir.path(), Options::default()).await.unwrap();
+    println!(
+        "db_open (recovery): {:.3}ms",
+        start.elapsed().as_secs_f64() * 1000.0
+    );
 
     let start = Instant::now();
     for i in 0..count {
@@ -61,7 +62,7 @@ async fn main() {
     println!("close:   {:.3}ms", start.elapsed().as_secs_f64() * 1000.0);
 
     println!("\n=== Compare: sync vs async overhead ===\n");
-    
+
     let dir2 = tempdir().unwrap();
     let db = Db::open(dir2.path(), Options::default().sync_writes(false))
         .await

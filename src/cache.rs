@@ -56,7 +56,8 @@ impl BlockCache {
         let mut evicted = 0;
         let target = needed.max(self.capacity / 10);
 
-        let keys_to_remove: Vec<_> = self.cache
+        let keys_to_remove: Vec<_> = self
+            .cache
             .iter()
             .take(32)
             .map(|entry| (*entry.key(), entry.value().len()))
@@ -73,10 +74,12 @@ impl BlockCache {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn size(&self) -> usize {
         self.current_size.load(Ordering::Relaxed)
     }
 
+    #[allow(dead_code)]
     pub(crate) fn clear(&self) {
         self.cache.clear();
         self.current_size.store(0, Ordering::Relaxed);
@@ -149,7 +152,7 @@ mod tests {
     #[test]
     fn test_cache_concurrent_access() {
         use std::thread;
-        
+
         let cache = BlockCache::new(1024 * 1024);
         let mut handles = Vec::new();
 

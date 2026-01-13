@@ -71,7 +71,7 @@ mod tests {
     #[test]
     fn test_all_error_variants() {
         let errors: Vec<Error> = vec![
-            Error::Io(std::io::Error::new(std::io::ErrorKind::Other, "test")),
+            Error::Io(std::io::Error::other("test")),
             Error::Corruption("test".into()),
             Error::InvalidCrc {
                 expected: 0,

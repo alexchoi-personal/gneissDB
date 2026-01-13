@@ -18,7 +18,6 @@ pub use error::{Error, Result};
 pub use options::{IoEngine, Options, ReadOptions, WriteOptions};
 
 use bytes::Bytes;
-use db::DbBatchOp;
 use std::path::Path;
 
 pub struct Db {
@@ -31,11 +30,21 @@ impl Db {
         tracing::info!(path = %path.as_ref().display(), "Opening database");
         let default_sync = options.sync_writes;
         let inner = db::DbInner::open(path.as_ref(), options).await?;
-        Ok(Self { inner, default_sync })
+        Ok(Self {
+            inner,
+            default_sync,
+        })
     }
 
     pub async fn put(&self, key: impl Into<Bytes>, value: impl Into<Bytes>) -> Result<()> {
-        self.put_opt(key, value, WriteOptions { sync: self.default_sync }).await
+        self.put_opt(
+            key,
+            value,
+            WriteOptions {
+                sync: self.default_sync,
+            },
+        )
+        .await
     }
 
     pub async fn put_opt(
@@ -46,7 +55,11 @@ impl Db {
     ) -> Result<()> {
         let key = key.into();
         let value = value.into();
-        tracing::debug!(key_len = key.len(), value_len = value.len(), "Put operation");
+        tracing::debug!(
+            key_len = key.len(),
+            value_len = value.len(),
+            "Put operation"
+        );
         self.inner.put(key, value, options).await
     }
 
@@ -64,7 +77,13 @@ impl Db {
     }
 
     pub async fn delete(&self, key: impl AsRef<[u8]>) -> Result<()> {
-        self.delete_opt(key, WriteOptions { sync: self.default_sync }).await
+        self.delete_opt(
+            key,
+            WriteOptions {
+                sync: self.default_sync,
+            },
+        )
+        .await
     }
 
     pub async fn delete_opt(&self, key: impl AsRef<[u8]>, options: WriteOptions) -> Result<()> {
@@ -73,7 +92,13 @@ impl Db {
     }
 
     pub async fn write(&self, batch: WriteBatch) -> Result<()> {
-        self.write_opt(batch, WriteOptions { sync: self.default_sync }).await
+        self.write_opt(
+            batch,
+            WriteOptions {
+                sync: self.default_sync,
+            },
+        )
+        .await
     }
 
     pub async fn write_opt(&self, batch: WriteBatch, options: WriteOptions) -> Result<()> {
@@ -81,7 +106,12 @@ impl Db {
         self.inner.write_batch_buffer(batch, options).await
     }
 
-    pub fn scan(&self, start: impl AsRef<[u8]>, end: impl AsRef<[u8]>, limit: usize) -> Vec<(Bytes, Bytes)> {
+    pub fn scan(
+        &self,
+        start: impl AsRef<[u8]>,
+        end: impl AsRef<[u8]>,
+        limit: usize,
+    ) -> Vec<(Bytes, Bytes)> {
         self.inner.scan(start.as_ref(), end.as_ref(), limit)
     }
 

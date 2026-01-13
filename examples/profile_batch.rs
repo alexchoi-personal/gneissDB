@@ -1,7 +1,7 @@
 use bytes::Bytes;
 use gneissdb::{Db, Options, WriteBatch};
-use tempfile::tempdir;
 use std::time::Instant;
+use tempfile::tempdir;
 
 #[tokio::main]
 async fn main() {
@@ -36,11 +36,14 @@ async fn main() {
         db.write(batch).await.unwrap();
     }
     let elapsed = start.elapsed();
-    
+
     let total_ops = batch_count * ops_per_batch;
     let ops_per_sec = total_ops as f64 / elapsed.as_secs_f64();
-    
+
     db.close().await.unwrap();
-    println!("Completed {} batches ({} ops) in {:?}", batch_count, total_ops, elapsed);
+    println!(
+        "Completed {} batches ({} ops) in {:?}",
+        batch_count, total_ops, elapsed
+    );
     println!("{:.0} ops/s", ops_per_sec);
 }

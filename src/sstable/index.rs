@@ -1,5 +1,5 @@
-use bytes::Bytes;
 use crate::error::{Error, Result};
+use bytes::Bytes;
 
 #[derive(Clone, Debug)]
 pub(crate) struct IndexEntry {
@@ -32,8 +32,10 @@ impl IndexBlock {
             return None;
         }
 
-        let idx = self.entries.partition_point(|entry| entry.last_key.as_ref() < key);
-        
+        let idx = self
+            .entries
+            .partition_point(|entry| entry.last_key.as_ref() < key);
+
         if idx < self.entries.len() {
             Some(&self.entries[idx])
         } else {
@@ -93,10 +95,12 @@ impl IndexBlock {
         Ok(Self { entries })
     }
 
+    #[allow(dead_code)]
     pub(crate) fn entries(&self) -> &[IndexEntry] {
         &self.entries
     }
 
+    #[allow(dead_code)]
     pub(crate) fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
@@ -163,7 +167,11 @@ mod tests {
     fn test_index_block_binary_search() {
         let mut index = IndexBlock::new();
         for i in 0..100 {
-            index.add(Bytes::from(format!("key{:03}", i * 10)), i as u64 * 1000, 100);
+            index.add(
+                Bytes::from(format!("key{:03}", i * 10)),
+                i as u64 * 1000,
+                100,
+            );
         }
 
         let entry = index.find_block(b"key000").unwrap();

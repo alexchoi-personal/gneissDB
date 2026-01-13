@@ -37,7 +37,8 @@ impl TableCache {
 
         let path = self.db_path.join(format!("{:06}.sst", file_number));
         let file_handle = self.fs.open_file(&path).await?;
-        let reader = SstableReader::open(file_handle, file_number, self.block_cache.clone()).await?;
+        let reader =
+            SstableReader::open(file_handle, file_number, self.block_cache.clone()).await?;
         let reader = Arc::new(reader);
 
         if self.cache.len() >= self.max_open_files {
@@ -53,10 +54,12 @@ impl TableCache {
         Ok(reader)
     }
 
+    #[allow(dead_code)]
     pub(crate) fn evict(&self, file_number: u64) {
         self.cache.remove(&file_number);
     }
 
+    #[allow(dead_code)]
     pub(crate) fn clear(&self) {
         self.cache.clear();
     }
@@ -85,10 +88,10 @@ mod tests {
         builder.finish().await.unwrap();
 
         let table_cache = TableCache::new(fs, dir.path().to_path_buf(), block_cache, 100);
-        
+
         let reader1 = table_cache.get(1).await.unwrap();
         let reader2 = table_cache.get(1).await.unwrap();
-        
+
         assert!(Arc::ptr_eq(&reader1, &reader2));
     }
 
@@ -106,10 +109,10 @@ mod tests {
         builder.finish().await.unwrap();
 
         let table_cache = TableCache::new(fs, dir.path().to_path_buf(), block_cache, 100);
-        
+
         let _reader = table_cache.get(1).await.unwrap();
         table_cache.evict(1);
-        
+
         let reader2 = table_cache.get(1).await.unwrap();
         assert_eq!(Arc::strong_count(&reader2), 2);
     }
@@ -127,8 +130,13 @@ mod tests {
         builder.add(&key, &Bytes::from("value")).await.unwrap();
         builder.finish().await.unwrap();
 
-        let table_cache = Arc::new(TableCache::new(fs, dir.path().to_path_buf(), block_cache, 100));
-        
+        let table_cache = Arc::new(TableCache::new(
+            fs,
+            dir.path().to_path_buf(),
+            block_cache,
+            100,
+        ));
+
         let mut handles = Vec::new();
         for _ in 0..8 {
             let cache = table_cache.clone();

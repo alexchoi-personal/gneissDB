@@ -8,9 +8,9 @@ pub(crate) struct BloomFilter {
 impl BloomFilter {
     pub(crate) fn new(bits_per_key: usize, num_keys: usize) -> Self {
         let bits = std::cmp::max(64, num_keys * bits_per_key);
-        let k = std::cmp::max(1, std::cmp::min(30, (bits_per_key as f64 * 0.69) as usize));
+        let k = ((bits_per_key as f64 * 0.69) as usize).clamp(1, 30);
         Self {
-            bits: vec![0u8; (bits + 7) / 8],
+            bits: vec![0u8; bits.div_ceil(8)],
             k,
         }
     }
@@ -29,7 +29,7 @@ impl BloomFilter {
 
     pub(crate) fn add(&mut self, key: &[u8]) {
         let mut h = Self::bloom_hash(key);
-        let delta = (h >> 17) | (h << 15);
+        let delta = h.rotate_left(15);
         let bits_len = self.bits.len() * 8;
         for _ in 0..self.k {
             let bit_pos = (h as usize) % bits_len;
@@ -40,7 +40,7 @@ impl BloomFilter {
 
     pub(crate) fn may_contain(&self, key: &[u8]) -> bool {
         let mut h = Self::bloom_hash(key);
-        let delta = (h >> 17) | (h << 15);
+        let delta = h.rotate_left(15);
         let bits_len = self.bits.len() * 8;
         for _ in 0..self.k {
             let bit_pos = (h as usize) % bits_len;
@@ -67,6 +67,7 @@ impl BloomFilter {
         h
     }
 
+    #[allow(dead_code)]
     pub(crate) fn size(&self) -> usize {
         self.bits.len() + 1
     }

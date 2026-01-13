@@ -9,7 +9,9 @@ async fn main() {
 
     println!("=== Setup: Write {} keys ===\n", count);
     {
-        let db = Db::open(dir.path(), Options::default().sync_writes(false)).await.unwrap();
+        let db = Db::open(dir.path(), Options::default().sync_writes(false))
+            .await
+            .unwrap();
         for i in 0..count {
             let key = format!("key{:08}", i);
             let value = format!("value{:08}", i);
@@ -36,12 +38,14 @@ async fn main() {
     let open_total: Duration = open_times.iter().sum();
     let close_total: Duration = close_times.iter().sum();
 
-    println!("db_open:  avg {:.3}ms (total {:.2}ms over {} calls)",
+    println!(
+        "db_open:  avg {:.3}ms (total {:.2}ms over {} calls)",
         open_total.as_secs_f64() * 1000.0 / open_times.len() as f64,
         open_total.as_secs_f64() * 1000.0,
         open_times.len()
     );
-    println!("db_close: avg {:.3}ms (total {:.2}ms over {} calls)",
+    println!(
+        "db_close: avg {:.3}ms (total {:.2}ms over {} calls)",
         close_total.as_secs_f64() * 1000.0 / close_times.len() as f64,
         close_total.as_secs_f64() * 1000.0,
         close_times.len()
@@ -57,7 +61,8 @@ async fn main() {
     }
     let read_time = start.elapsed();
 
-    println!("get: {:.3}ms for {} reads = {:.0} ops/sec",
+    println!(
+        "get: {:.3}ms for {} reads = {:.0} ops/sec",
         read_time.as_secs_f64() * 1000.0,
         count,
         count as f64 / read_time.as_secs_f64()
@@ -81,7 +86,8 @@ async fn main() {
     }
 
     let total: Duration = total_times.iter().sum();
-    println!("open+read+close: avg {:.3}ms = {:.0} effective ops/sec",
+    println!(
+        "open+read+close: avg {:.3}ms = {:.0} effective ops/sec",
         total.as_secs_f64() * 1000.0 / total_times.len() as f64,
         (count * total_times.len()) as f64 / total.as_secs_f64()
     );

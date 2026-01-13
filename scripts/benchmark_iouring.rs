@@ -56,12 +56,14 @@ async fn benchmark_standard(count: usize) {
     }
     let read_time = start.elapsed();
 
-    println!("  Write {} keys: {:.2}ms ({:.0} ops/sec)",
+    println!(
+        "  Write {} keys: {:.2}ms ({:.0} ops/sec)",
         count,
         write_time.as_secs_f64() * 1000.0,
         count as f64 / write_time.as_secs_f64()
     );
-    println!("  Read {} keys:  {:.2}ms ({:.0} ops/sec)",
+    println!(
+        "  Read {} keys:  {:.2}ms ({:.0} ops/sec)",
         count,
         read_time.as_secs_f64() * 1000.0,
         count as f64 / read_time.as_secs_f64()
@@ -99,12 +101,14 @@ async fn benchmark_iouring(count: usize) {
     }
     let read_time = start.elapsed();
 
-    println!("  Write {} keys: {:.2}ms ({:.0} ops/sec)",
+    println!(
+        "  Write {} keys: {:.2}ms ({:.0} ops/sec)",
         count,
         write_time.as_secs_f64() * 1000.0,
         count as f64 / write_time.as_secs_f64()
     );
-    println!("  Read {} keys:  {:.2}ms ({:.0} ops/sec)",
+    println!(
+        "  Read {} keys:  {:.2}ms ({:.0} ops/sec)",
         count,
         read_time.as_secs_f64() * 1000.0,
         count as f64 / read_time.as_secs_f64()

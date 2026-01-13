@@ -1,5 +1,5 @@
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput};
-use rocksdb_rs::{Db, Options};
+use gneissdb::{Db, Options};
 use tempfile::tempdir;
 
 fn sstable_flush(c: &mut Criterion) {
@@ -103,5 +103,10 @@ fn sstable_compaction(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, sstable_flush, sstable_read_after_flush, sstable_compaction);
+criterion_group!(
+    benches,
+    sstable_flush,
+    sstable_read_after_flush,
+    sstable_compaction
+);
 criterion_main!(benches);

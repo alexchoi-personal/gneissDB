@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 pub(crate) struct WalWriter {
     file: Box<dyn WritableFile>,
+    #[allow(dead_code)]
     path: PathBuf,
     sync_on_write: bool,
     encode_buf: Vec<u8>,
@@ -29,6 +30,7 @@ impl WalWriter {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn path(&self) -> &PathBuf {
         &self.path
     }
@@ -46,7 +48,7 @@ impl WalWriter {
     pub(crate) async fn append_no_sync(&mut self, record: &WalRecord) -> Result<()> {
         self.encode_buf.clear();
         Self::encode_record_into(record, &mut self.encode_buf);
-        
+
         let crc = crc32fast::hash(&self.encode_buf);
         let len = self.encode_buf.len() as u32;
 
@@ -92,14 +94,20 @@ impl WalWriter {
             WalRecord::Put { key, value, .. } => 1 + 8 + 4 + key.len() + 4 + value.len(),
             WalRecord::Delete { key, .. } => 1 + 8 + 4 + key.len(),
             WalRecord::Batch { ops, .. } => {
-                1 + 8 + 4 + ops.iter().map(|op| match op {
-                    BatchOp::Put { key, value } => 1 + 4 + key.len() + 4 + value.len(),
-                    BatchOp::Delete { key } => 1 + 4 + key.len(),
-                }).sum::<usize>()
+                1 + 8
+                    + 4
+                    + ops
+                        .iter()
+                        .map(|op| match op {
+                            BatchOp::Put { key, value } => 1 + 4 + key.len() + 4 + value.len(),
+                            BatchOp::Delete { key } => 1 + 4 + key.len(),
+                        })
+                        .sum::<usize>()
             }
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) async fn append_batch_owned(
         &mut self,
         sequence: u64,
@@ -109,22 +117,26 @@ impl WalWriter {
         self.encode_buf.clear();
         self.encode_buf.push(RECORD_TYPE_BATCH);
         self.encode_buf.extend_from_slice(&sequence.to_le_bytes());
-        self.encode_buf.extend_from_slice(&(ops.len() as u32).to_le_bytes());
+        self.encode_buf
+            .extend_from_slice(&(ops.len() as u32).to_le_bytes());
 
         for (i, op) in ops.into_iter().enumerate() {
             let seq = sequence + i as u64;
             match op {
                 DbBatchOp::Put(key, value) => {
                     self.encode_buf.push(BATCH_OP_PUT);
-                    self.encode_buf.extend_from_slice(&(key.len() as u32).to_le_bytes());
+                    self.encode_buf
+                        .extend_from_slice(&(key.len() as u32).to_le_bytes());
                     self.encode_buf.extend_from_slice(&key);
-                    self.encode_buf.extend_from_slice(&(value.len() as u32).to_le_bytes());
+                    self.encode_buf
+                        .extend_from_slice(&(value.len() as u32).to_le_bytes());
                     self.encode_buf.extend_from_slice(&value);
                     memtable.put(key, seq, value);
                 }
                 DbBatchOp::Delete(key) => {
                     self.encode_buf.push(BATCH_OP_DELETE);
-                    self.encode_buf.extend_from_slice(&(key.len() as u32).to_le_bytes());
+                    self.encode_buf
+                        .extend_from_slice(&(key.len() as u32).to_le_bytes());
                     self.encode_buf.extend_from_slice(&key);
                     memtable.delete(key, seq);
                 }
@@ -234,8 +246,8 @@ impl WalWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fs::RealFileSystem;
     use crate::fs::FileSystem;
+    use crate::fs::RealFileSystem;
     use tempfile::tempdir;
 
     #[tokio::test]

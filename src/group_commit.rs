@@ -87,7 +87,9 @@ impl GroupCommitQueue {
             completion: tx,
         };
 
-        self.batch_state.pending_count.fetch_add(1, Ordering::SeqCst);
+        self.batch_state
+            .pending_count
+            .fetch_add(1, Ordering::SeqCst);
         self.batch_state.batch_ready.notify_one();
 
         self.sender.send(request).await.map_err(|_| {
@@ -158,7 +160,7 @@ async fn batch_processor(
         }
 
         let needs_sync = batch.iter().any(|r| r.sync);
-        let batch_to_process: Vec<WriteRequest> = batch.drain(..).collect();
+        let batch_to_process: Vec<WriteRequest> = std::mem::take(&mut batch);
         process_batch(batch_to_process, &wal, needs_sync).await;
     }
 }

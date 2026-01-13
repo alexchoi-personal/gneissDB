@@ -1,5 +1,5 @@
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput};
-use rocksdb_rs::{Db, Options, WriteBatch, WriteOptions};
+use gneissdb::{Db, Options, WriteBatch, WriteOptions};
 use tempfile::tempdir;
 
 fn batch_write(c: &mut Criterion) {
@@ -15,17 +15,16 @@ fn batch_write(c: &mut Criterion) {
                 b.iter_batched(
                     || {
                         let dir = tempdir().unwrap();
-                        let db = rt.block_on(Db::open(dir.path(), Options::default())).unwrap();
+                        let db = rt
+                            .block_on(Db::open(dir.path(), Options::default()))
+                            .unwrap();
                         (dir, db, batch_size)
                     },
                     |(_dir, db, batch_size)| {
                         rt.block_on(async {
                             let mut batch = WriteBatch::new();
                             for i in 0..batch_size {
-                                batch.put(
-                                    format!("key{:08}", i),
-                                    format!("value{:08}", i),
-                                );
+                                batch.put(format!("key{:08}", i), format!("value{:08}", i));
                             }
                             db.write(batch).await.unwrap();
                         });
@@ -48,7 +47,9 @@ fn sequential_writes(c: &mut Criterion) {
             b.iter_batched(
                 || {
                     let dir = tempdir().unwrap();
-                    let db = rt.block_on(Db::open(dir.path(), Options::default())).unwrap();
+                    let db = rt
+                        .block_on(Db::open(dir.path(), Options::default()))
+                        .unwrap();
                     (dir, db, size)
                 },
                 |(_dir, db, size)| {
@@ -78,12 +79,14 @@ fn write_with_sync(c: &mut Criterion) {
             b.iter_batched(
                 || {
                     let dir = tempdir().unwrap();
-                    let db = rt.block_on(Db::open(dir.path(), Options::default())).unwrap();
+                    let db = rt
+                        .block_on(Db::open(dir.path(), Options::default()))
+                        .unwrap();
                     (dir, db, sync)
                 },
                 |(_dir, db, sync)| {
                     rt.block_on(async {
-                        let options = WriteOptions { sync };
+                        let options = WriteOptions::default().sync(sync);
                         for i in 0..100 {
                             let key = format!("key{:08}", i);
                             let value = format!("value{:08}", i);
@@ -111,7 +114,9 @@ fn large_value_writes(c: &mut Criterion) {
                 b.iter_batched(
                     || {
                         let dir = tempdir().unwrap();
-                        let db = rt.block_on(Db::open(dir.path(), Options::default())).unwrap();
+                        let db = rt
+                            .block_on(Db::open(dir.path(), Options::default()))
+                            .unwrap();
                         let value = "x".repeat(value_size);
                         (dir, db, value)
                     },
@@ -119,7 +124,7 @@ fn large_value_writes(c: &mut Criterion) {
                         rt.block_on(async {
                             for i in 0..100 {
                                 let key = format!("key{:08}", i);
-                                db.put(&key, &value).await.unwrap();
+                                db.put(key, value.clone()).await.unwrap();
                             }
                         });
                     },
@@ -131,5 +136,11 @@ fn large_value_writes(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, batch_write, sequential_writes, write_with_sync, large_value_writes);
+criterion_group!(
+    benches,
+    batch_write,
+    sequential_writes,
+    write_with_sync,
+    large_value_writes
+);
 criterion_main!(benches);

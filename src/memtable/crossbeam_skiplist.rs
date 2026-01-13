@@ -1,6 +1,6 @@
 use crate::memtable::LookupResult;
 use crate::types::{InternalKey, SequenceNumber, ValueType};
-use bytes::{Bytes, BytesMut, BufMut};
+use bytes::{BufMut, Bytes, BytesMut};
 use crossbeam_skiplist::SkipMap;
 use std::ops::Bound;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -45,7 +45,12 @@ impl Memtable {
     }
 
     #[inline]
-    fn encode_key_into(buf: &mut Vec<u8>, user_key: &[u8], sequence: SequenceNumber, value_type: ValueType) {
+    fn encode_key_into(
+        buf: &mut Vec<u8>,
+        user_key: &[u8],
+        sequence: SequenceNumber,
+        value_type: ValueType,
+    ) {
         buf.clear();
         buf.reserve(user_key.len() + 9);
         buf.extend_from_slice(user_key);
@@ -60,7 +65,11 @@ impl Memtable {
 
         let mut total_size = 0;
         for (user_key, sequence, value) in ops {
-            let value_type = if value.is_some() { ValueType::Value } else { ValueType::Deletion };
+            let value_type = if value.is_some() {
+                ValueType::Value
+            } else {
+                ValueType::Deletion
+            };
             let encoded_key = Self::encode_key(user_key, *sequence, value_type);
             let val = value.clone().unwrap_or_else(Bytes::new);
             total_size += encoded_key.len() + val.len();
@@ -69,7 +78,13 @@ impl Memtable {
         self.size.fetch_add(total_size, Ordering::Relaxed);
     }
 
-    pub(crate) fn put_inline(&self, user_key: &[u8], sequence: SequenceNumber, value: Bytes, key_buf: &mut Vec<u8>) -> usize {
+    pub(crate) fn put_inline(
+        &self,
+        user_key: &[u8],
+        sequence: SequenceNumber,
+        value: Bytes,
+        key_buf: &mut Vec<u8>,
+    ) -> usize {
         Self::encode_key_into(key_buf, user_key, sequence, ValueType::Value);
         let encoded_key = Bytes::copy_from_slice(key_buf);
         let entry_size = encoded_key.len() + value.len();
@@ -77,7 +92,12 @@ impl Memtable {
         entry_size
     }
 
-    pub(crate) fn delete_inline(&self, user_key: &[u8], sequence: SequenceNumber, key_buf: &mut Vec<u8>) -> usize {
+    pub(crate) fn delete_inline(
+        &self,
+        user_key: &[u8],
+        sequence: SequenceNumber,
+        key_buf: &mut Vec<u8>,
+    ) -> usize {
         Self::encode_key_into(key_buf, user_key, sequence, ValueType::Deletion);
         let encoded_key = Bytes::copy_from_slice(key_buf);
         let entry_size = encoded_key.len();
@@ -134,9 +154,7 @@ impl Memtable {
         let entries: Vec<_> = self
             .skiplist
             .iter()
-            .filter_map(|e| {
-                InternalKey::decode(e.key()).map(|key| (key, e.value().clone()))
-            })
+            .filter_map(|e| InternalKey::decode(e.key()).map(|key| (key, e.value().clone())))
             .collect();
         MemtableIterator {
             entries,

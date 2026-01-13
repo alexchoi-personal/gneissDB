@@ -71,6 +71,7 @@ impl Footer {
         })
     }
 
+    #[allow(dead_code)]
     pub(crate) fn may_contain_key(&self, key: &[u8]) -> bool {
         let key_prefix = &key[..std::cmp::min(key.len(), 8)];
         let min_prefix = &self.min_key[..std::cmp::min(self.min_key.len(), 8)];

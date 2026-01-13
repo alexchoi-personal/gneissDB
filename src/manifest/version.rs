@@ -44,6 +44,7 @@ pub(crate) struct VersionSet {
     next_file_number: AtomicU64,
     last_sequence: AtomicU64,
     max_levels: usize,
+    #[allow(dead_code)]
     manifest_file_number: u64,
 }
 
@@ -116,10 +117,12 @@ impl VersionSet {
         self.current = new_version;
     }
 
+    #[allow(dead_code)]
     pub(crate) fn manifest_file_number(&self) -> u64 {
         self.manifest_file_number
     }
 
+    #[allow(dead_code)]
     pub(crate) fn num_levels(&self) -> usize {
         self.max_levels
     }

@@ -2,7 +2,9 @@ use bytes::Bytes;
 use std::cmp::Ordering;
 
 pub(crate) type SequenceNumber = u64;
+#[allow(dead_code)]
 pub(crate) type UserKey = Bytes;
+#[allow(dead_code)]
 pub(crate) type UserValue = Bytes;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -30,6 +32,7 @@ pub(crate) struct InternalKey {
 }
 
 impl InternalKey {
+    #[allow(dead_code)]
     pub(crate) fn new(user_key: Bytes, sequence: SequenceNumber, value_type: ValueType) -> Self {
         Self {
             user_key,
@@ -38,6 +41,7 @@ impl InternalKey {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn new_for_seek(user_key: Bytes, sequence: SequenceNumber) -> Self {
         Self::new(user_key, sequence, ValueType::Value)
     }
@@ -51,6 +55,7 @@ impl InternalKey {
         Bytes::from(buf)
     }
 
+    #[allow(dead_code)]
     pub(crate) fn encode_to(&self, buf: &mut [u8]) -> usize {
         let len = self.user_key.len();
         buf[..len].copy_from_slice(&self.user_key);
@@ -65,7 +70,8 @@ impl InternalKey {
             return None;
         }
         let user_key = Bytes::copy_from_slice(&data[..data.len() - 9]);
-        let inverted_seq = u64::from_be_bytes(data[data.len() - 9..data.len() - 1].try_into().ok()?);
+        let inverted_seq =
+            u64::from_be_bytes(data[data.len() - 9..data.len() - 1].try_into().ok()?);
         let sequence = !inverted_seq;
         let value_type = ValueType::from_u8(data[data.len() - 1])?;
         Some(Self {
@@ -75,6 +81,7 @@ impl InternalKey {
         })
     }
 
+    #[allow(dead_code)]
     pub(crate) fn encoded_len(&self) -> usize {
         self.user_key.len() + 9
     }
@@ -92,7 +99,8 @@ impl<'a> ParsedInternalKey<'a> {
             return None;
         }
         let user_key = &data[..data.len() - 9];
-        let inverted_seq = u64::from_be_bytes(data[data.len() - 9..data.len() - 1].try_into().ok()?);
+        let inverted_seq =
+            u64::from_be_bytes(data[data.len() - 9..data.len() - 1].try_into().ok()?);
         let sequence = !inverted_seq;
         let value_type = ValueType::from_u8(data[data.len() - 1])?;
         Some(Self {

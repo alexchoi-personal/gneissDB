@@ -20,6 +20,7 @@ pub struct Options {
     pub(crate) max_levels: usize,
     pub(crate) sync_writes: bool,
     pub(crate) bloom_bits_per_key: usize,
+    #[allow(dead_code)]
     pub(crate) block_restart_interval: usize,
     pub(crate) write_stall_delay: Duration,
     pub(crate) io_engine: IoEngine,

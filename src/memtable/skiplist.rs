@@ -1,6 +1,6 @@
 use crate::memtable::LookupResult;
 use crate::types::{InternalKey, SequenceNumber, ValueType};
-use bytes::{Bytes, BytesMut, BufMut};
+use bytes::Bytes;
 use parking_lot::Mutex;
 use std::alloc::{alloc, dealloc, Layout};
 use std::ptr;
@@ -35,30 +35,34 @@ impl Arena {
         loop {
             let remaining = self.remaining.load(Ordering::Relaxed);
             let current = self.current.load(Ordering::Relaxed);
-            
+
             let current_addr = current as usize;
             let alloc_start = current_addr + (remaining - size);
             let aligned_start = alloc_start & !(align - 1);
             let padding = alloc_start - aligned_start;
             let total_needed = size + padding;
-            
+
             if remaining >= total_needed {
                 let new_remaining = remaining - total_needed;
-                if self.remaining.compare_exchange(
-                    remaining,
-                    new_remaining,
-                    Ordering::SeqCst,
-                    Ordering::Relaxed,
-                ).is_ok() {
+                if self
+                    .remaining
+                    .compare_exchange(
+                        remaining,
+                        new_remaining,
+                        Ordering::SeqCst,
+                        Ordering::Relaxed,
+                    )
+                    .is_ok()
+                {
                     return aligned_start as *mut u8;
                 }
             } else {
                 let new_block_size = ARENA_BLOCK_SIZE.max(size + align);
                 let (new_ptr, new_layout) = Self::alloc_block(new_block_size);
-                
+
                 let mut blocks = self.blocks.lock();
                 blocks.push((new_ptr, new_layout));
-                
+
                 self.current.store(new_ptr, Ordering::Release);
                 self.remaining.store(new_block_size, Ordering::Release);
             }
@@ -69,15 +73,18 @@ impl Arena {
         let key_len = key.len();
         let node_size = std::mem::size_of::<Node>();
         let node_align = std::mem::align_of::<Node>();
-        
+
         let node_ptr = self.allocate(node_size, node_align) as *mut Node;
-        
+
         let key_ptr = self.allocate(key_len, 1);
         unsafe {
             ptr::copy_nonoverlapping(key.as_ptr(), key_ptr, key_len);
-            ptr::write(node_ptr, Node::new_inline(key_ptr, key_len as u32, value, height));
+            ptr::write(
+                node_ptr,
+                Node::new_inline(key_ptr, key_len as u32, value, height),
+            );
         }
-        
+
         node_ptr
     }
 }
@@ -96,6 +103,7 @@ impl Drop for Arena {
 unsafe impl Send for Arena {}
 unsafe impl Sync for Arena {}
 
+#[allow(dead_code)]
 struct Node {
     key_ptr: *const u8,
     key_len: u32,
@@ -105,6 +113,7 @@ struct Node {
 }
 
 impl Node {
+    #[allow(clippy::declare_interior_mutable_const)]
     fn new_inline(key_ptr: *const u8, key_len: u32, value: Bytes, height: usize) -> Self {
         const NULL: AtomicPtr<Node> = AtomicPtr::new(ptr::null_mut());
         Self {
@@ -209,7 +218,10 @@ impl LockFreeSkipList {
                 unsafe {
                     (*new_node).next[0].store(succ, Ordering::Relaxed);
                     let pred_next = &(*pred).next[0];
-                    if pred_next.compare_exchange(succ, new_node, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
+                    if pred_next
+                        .compare_exchange(succ, new_node, Ordering::SeqCst, Ordering::SeqCst)
+                        .is_ok()
+                    {
                         self.last_insert.store(new_node, Ordering::Relaxed);
                         self.len.fetch_add(1, Ordering::Relaxed);
                         return entry_size;
@@ -224,22 +236,18 @@ impl LockFreeSkipList {
             let mut preds: [*mut Node; MAX_HEIGHT] = [head_ptr; MAX_HEIGHT];
             let mut succs: [*mut Node; MAX_HEIGHT] = [ptr::null_mut(); MAX_HEIGHT];
 
-            self.find(&key, &mut preds, &mut succs);
+            self.find(key, &mut preds, &mut succs);
 
-            for level in 0..height {
+            for (level, &succ) in succs.iter().enumerate().take(height) {
                 unsafe {
-                    (*new_node).next[level].store(succs[level], Ordering::Relaxed);
+                    (*new_node).next[level].store(succ, Ordering::Relaxed);
                 }
             }
 
             unsafe {
                 let pred = &(*preds[0]).next[0];
-                match pred.compare_exchange(
-                    succs[0],
-                    new_node,
-                    Ordering::SeqCst,
-                    Ordering::SeqCst,
-                ) {
+                match pred.compare_exchange(succs[0], new_node, Ordering::SeqCst, Ordering::SeqCst)
+                {
                     Ok(_) => {
                         for level in 1..height {
                             loop {
@@ -247,7 +255,7 @@ impl LockFreeSkipList {
                                 let succ = succs[level];
 
                                 if (*new_node).next[level].load(Ordering::SeqCst) != succ {
-                                    self.find(&key, &mut preds, &mut succs);
+                                    self.find(key, &mut preds, &mut succs);
                                     (*new_node).next[level].store(succs[level], Ordering::Relaxed);
                                     continue;
                                 }
@@ -260,8 +268,9 @@ impl LockFreeSkipList {
                                 ) {
                                     Ok(_) => break,
                                     Err(_) => {
-                                        self.find(&key, &mut preds, &mut succs);
-                                        (*new_node).next[level].store(succs[level], Ordering::Relaxed);
+                                        self.find(key, &mut preds, &mut succs);
+                                        (*new_node).next[level]
+                                            .store(succs[level], Ordering::Relaxed);
                                     }
                                 }
                             }
@@ -340,7 +349,11 @@ impl LockFreeSkipList {
             None
         } else {
             unsafe {
-                Some((result, Bytes::copy_from_slice((*result).key()), (*result).value.clone()))
+                Some((
+                    result,
+                    Bytes::copy_from_slice((*result).key()),
+                    (*result).value.clone(),
+                ))
             }
         }
     }
@@ -353,7 +366,13 @@ impl LockFreeSkipList {
         if next.is_null() {
             None
         } else {
-            unsafe { Some((next, Bytes::copy_from_slice((*next).key()), (*next).value.clone())) }
+            unsafe {
+                Some((
+                    next,
+                    Bytes::copy_from_slice((*next).key()),
+                    (*next).value.clone(),
+                ))
+            }
         }
     }
 
@@ -377,7 +396,7 @@ impl LockFreeSkipList {
 
             while !curr.is_null() {
                 let curr_key = unsafe { (*curr).key() };
-                if curr_key.as_ref() < key {
+                if curr_key < key {
                     pred = curr;
                     curr = unsafe { (*curr).next[level].load(Ordering::SeqCst) };
                 } else {
@@ -475,7 +494,7 @@ impl Memtable {
         thread_local! {
             static BUF: std::cell::RefCell<Vec<u8>> = std::cell::RefCell::new(Vec::with_capacity(256));
         }
-        
+
         BUF.with(|buf| {
             let mut buf = buf.borrow_mut();
             Self::encode_key_into(&mut buf, &user_key, sequence, ValueType::Value);
@@ -488,7 +507,7 @@ impl Memtable {
         thread_local! {
             static BUF: std::cell::RefCell<Vec<u8>> = std::cell::RefCell::new(Vec::with_capacity(256));
         }
-        
+
         BUF.with(|buf| {
             let mut buf = buf.borrow_mut();
             Self::encode_key_into(&mut buf, &user_key, sequence, ValueType::Deletion);
@@ -498,7 +517,12 @@ impl Memtable {
     }
 
     #[inline]
-    fn encode_key_into(buf: &mut Vec<u8>, user_key: &[u8], sequence: SequenceNumber, value_type: ValueType) {
+    fn encode_key_into(
+        buf: &mut Vec<u8>,
+        user_key: &[u8],
+        sequence: SequenceNumber,
+        value_type: ValueType,
+    ) {
         buf.clear();
         buf.reserve(user_key.len() + 9);
         buf.extend_from_slice(user_key);
@@ -506,6 +530,7 @@ impl Memtable {
         buf.push(value_type as u8);
     }
 
+    #[allow(dead_code)]
     pub(crate) fn put_batch(&self, ops: &[(Bytes, SequenceNumber, Option<Bytes>)]) {
         if ops.is_empty() {
             return;
@@ -515,7 +540,11 @@ impl Memtable {
         let mut total_size = 0;
 
         for (user_key, sequence, value) in ops {
-            let value_type = if value.is_some() { ValueType::Value } else { ValueType::Deletion };
+            let value_type = if value.is_some() {
+                ValueType::Value
+            } else {
+                ValueType::Deletion
+            };
             Self::encode_key_into(&mut key_buf, user_key, *sequence, value_type);
             let val = value.clone().unwrap_or_else(Bytes::new);
             total_size += self.skiplist.insert_inline(&key_buf, val);
@@ -523,12 +552,23 @@ impl Memtable {
         self.size.fetch_add(total_size, Ordering::Relaxed);
     }
 
-    pub(crate) fn put_inline(&self, user_key: &[u8], sequence: SequenceNumber, value: Bytes, key_buf: &mut Vec<u8>) -> usize {
+    pub(crate) fn put_inline(
+        &self,
+        user_key: &[u8],
+        sequence: SequenceNumber,
+        value: Bytes,
+        key_buf: &mut Vec<u8>,
+    ) -> usize {
         Self::encode_key_into(key_buf, user_key, sequence, ValueType::Value);
         self.skiplist.insert_inline(key_buf, value)
     }
 
-    pub(crate) fn delete_inline(&self, user_key: &[u8], sequence: SequenceNumber, key_buf: &mut Vec<u8>) -> usize {
+    pub(crate) fn delete_inline(
+        &self,
+        user_key: &[u8],
+        sequence: SequenceNumber,
+        key_buf: &mut Vec<u8>,
+    ) -> usize {
         Self::encode_key_into(key_buf, user_key, sequence, ValueType::Deletion);
         self.skiplist.insert_inline(key_buf, Bytes::new())
     }
@@ -581,9 +621,7 @@ impl Memtable {
         let entries: Vec<_> = self
             .skiplist
             .iter()
-            .filter_map(|(k, v)| {
-                InternalKey::decode(&k).map(|key| (key, v))
-            })
+            .filter_map(|(k, v)| InternalKey::decode(&k).map(|key| (key, v)))
             .collect();
         MemtableIterator {
             entries,
@@ -642,7 +680,10 @@ impl Memtable {
             last_user_key = Some(user_key.to_vec());
 
             if value_type == ValueType::Value as u8 {
-                results.push((Bytes::copy_from_slice(user_key), Bytes::copy_from_slice(value)));
+                results.push((
+                    Bytes::copy_from_slice(user_key),
+                    Bytes::copy_from_slice(value),
+                ));
                 if results.len() >= limit {
                     break;
                 }
@@ -742,7 +783,11 @@ mod tests {
         assert!(!memtable.is_full());
 
         for i in 0..10 {
-            memtable.put(Bytes::from(format!("key{}", i)), i as u64, Bytes::from("x".repeat(20)));
+            memtable.put(
+                Bytes::from(format!("key{}", i)),
+                i as u64,
+                Bytes::from("x".repeat(20)),
+            );
         }
         assert!(memtable.is_full());
     }

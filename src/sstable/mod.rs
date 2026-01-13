@@ -5,9 +5,9 @@ mod footer;
 mod index;
 mod reader;
 
-pub(crate) use block::{Block, BlockBuilder, BlockIterator};
+pub(crate) use block::{Block, BlockBuilder};
 pub(crate) use bloom::BloomFilter;
 pub(crate) use builder::SstableBuilder;
-pub(crate) use footer::{Footer, FOOTER_SIZE, MAGIC};
-pub(crate) use index::{IndexBlock, IndexEntry};
+pub(crate) use footer::{Footer, FOOTER_SIZE};
+pub(crate) use index::IndexBlock;
 pub(crate) use reader::SstableReader;

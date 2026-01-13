@@ -20,7 +20,10 @@ async fn main() {
 
         let start = Instant::now();
         file.sync_all().await.unwrap();
-        println!("sync_all (10KB buffered): {:.3}ms", start.elapsed().as_secs_f64() * 1000.0);
+        println!(
+            "sync_all (10KB buffered): {:.3}ms",
+            start.elapsed().as_secs_f64() * 1000.0
+        );
     }
 
     println!("\n--- File open cost ---");
@@ -54,7 +57,10 @@ async fn main() {
 
         let start = Instant::now();
         file.sync_all().await.unwrap();
-        println!("Final sync_all (500KB): {:.3}ms", start.elapsed().as_secs_f64() * 1000.0);
+        println!(
+            "Final sync_all (500KB): {:.3}ms",
+            start.elapsed().as_secs_f64() * 1000.0
+        );
     }
 
     println!("\n--- CRC32 computation cost ---");
@@ -101,7 +107,7 @@ async fn main() {
 
         let receiver = tokio::spawn(async move {
             let mut count = 0u64;
-            while let Some(_) = rx.recv().await {
+            while rx.recv().await.is_some() {
                 count += 1;
                 if count >= 100000 {
                     break;

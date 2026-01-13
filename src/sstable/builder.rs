@@ -19,6 +19,7 @@ pub(crate) struct SstableBuilder {
 }
 
 pub(crate) struct SstableMetadata {
+    #[allow(dead_code)]
     pub(crate) path: PathBuf,
     pub(crate) file_size: u64,
     pub(crate) entry_count: usize,
@@ -73,17 +74,12 @@ impl SstableBuilder {
         }
 
         let last_key = Bytes::copy_from_slice(self.block_builder.last_key());
-        let block_data = std::mem::replace(
-            &mut self.block_builder,
-            BlockBuilder::new(16),
-        )
-        .finish();
+        let block_data = std::mem::replace(&mut self.block_builder, BlockBuilder::new(16)).finish();
 
         let block_size = block_data.len() as u32;
         self.file.append(&block_data).await?;
 
-        self.index
-            .add(last_key, self.current_offset, block_size);
+        self.index.add(last_key, self.current_offset, block_size);
         self.current_offset += block_size as u64;
 
         Ok(())
@@ -128,6 +124,7 @@ impl SstableBuilder {
         })
     }
 
+    #[allow(dead_code)]
     pub(crate) fn estimated_size(&self) -> u64 {
         self.current_offset + self.block_builder.estimated_size() as u64
     }

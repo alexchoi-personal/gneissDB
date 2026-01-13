@@ -23,7 +23,9 @@ impl SstableReader {
         cache: Arc<BlockCache>,
     ) -> Result<Self> {
         let file_size = file.size().await?;
-        let footer_data = file.read(file_size - FOOTER_SIZE as u64, FOOTER_SIZE).await?;
+        let footer_data = file
+            .read(file_size - FOOTER_SIZE as u64, FOOTER_SIZE)
+            .await?;
         let footer = Footer::decode(&footer_data)?;
 
         let index_data = file
@@ -50,7 +52,11 @@ impl SstableReader {
         })
     }
 
-    pub(crate) async fn get(&self, user_key: &[u8], sequence: SequenceNumber) -> Result<LookupResult> {
+    pub(crate) async fn get(
+        &self,
+        user_key: &[u8],
+        sequence: SequenceNumber,
+    ) -> Result<LookupResult> {
         if let Some(bloom) = &self.bloom {
             if !bloom.may_contain(user_key) {
                 return Ok(LookupResult::NotFound);
@@ -69,7 +75,7 @@ impl SstableReader {
         let block = self.read_block(entry.offset, entry.size as usize).await?;
 
         let mut iter = block.seek(encoded_seek);
-        
+
         while let Some((value_start, value_end)) = iter.advance() {
             let key = iter.current_key();
             if let Some(parsed) = ParsedInternalKey::parse(key) {
@@ -81,7 +87,9 @@ impl SstableReader {
                 }
                 if parsed.sequence <= sequence {
                     return match parsed.value_type {
-                        ValueType::Value => Ok(LookupResult::Found(iter.value_slice(value_start, value_end))),
+                        ValueType::Value => Ok(LookupResult::Found(
+                            iter.value_slice(value_start, value_end),
+                        )),
                         ValueType::Deletion => Ok(LookupResult::Deleted),
                     };
                 }
@@ -102,14 +110,17 @@ impl SstableReader {
         Ok(block)
     }
 
+    #[allow(dead_code)]
     pub(crate) fn min_key(&self) -> &Bytes {
         &self.footer.min_key
     }
 
+    #[allow(dead_code)]
     pub(crate) fn max_key(&self) -> &Bytes {
         &self.footer.max_key
     }
 
+    #[allow(dead_code)]
     pub(crate) fn file_number(&self) -> u64 {
         self.file_number
     }
@@ -134,11 +145,8 @@ mod tests {
         let mut builder = SstableBuilder::new(file, path.clone(), 4096, 10, entries.len());
 
         for (i, (key, value)) in entries.iter().enumerate() {
-            let internal_key = InternalKey::new(
-                Bytes::from(key.to_string()),
-                i as u64 + 1,
-                ValueType::Value,
-            );
+            let internal_key =
+                InternalKey::new(Bytes::from(key.to_string()), i as u64 + 1, ValueType::Value);
             builder
                 .add(&internal_key, &Bytes::from(value.to_string()))
                 .await
@@ -261,8 +269,11 @@ mod tests {
         let entries: Vec<_> = (0..1000)
             .map(|i| (format!("key{:06}", i), format!("value{:06}", i)))
             .collect();
-        let entries_ref: Vec<_> = entries.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
-        
+        let _entries_ref: Vec<_> = entries
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
+
         let path = dir.path().join("test.sst");
         let fs = RealFileSystem::new();
         let file = fs.create_file(&path).await.unwrap();
@@ -270,11 +281,8 @@ mod tests {
         let mut builder = SstableBuilder::new(file, path.clone(), 4096, 10, entries.len());
 
         for (i, (key, value)) in entries.iter().enumerate() {
-            let internal_key = InternalKey::new(
-                Bytes::from(key.clone()),
-                i as u64 + 1,
-                ValueType::Value,
-            );
+            let internal_key =
+                InternalKey::new(Bytes::from(key.clone()), i as u64 + 1, ValueType::Value);
             builder
                 .add(&internal_key, &Bytes::from(value.clone()))
                 .await

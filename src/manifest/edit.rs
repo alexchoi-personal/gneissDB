@@ -28,10 +28,12 @@ impl VersionEdit {
         Self::default()
     }
 
+    #[allow(dead_code)]
     pub(crate) fn set_next_file_number(&mut self, num: u64) {
         self.next_file_number = Some(num);
     }
 
+    #[allow(dead_code)]
     pub(crate) fn set_last_sequence(&mut self, seq: u64) {
         self.last_sequence = Some(seq);
     }
@@ -57,6 +59,7 @@ impl VersionEdit {
         self.deleted_files.push(DeletedFile { level, file_number });
     }
 
+    #[allow(dead_code)]
     pub(crate) fn encode(&self) -> Bytes {
         let mut buf = Vec::new();
 
@@ -90,6 +93,7 @@ impl VersionEdit {
         Bytes::from(buf)
     }
 
+    #[allow(dead_code)]
     pub(crate) fn decode(data: &[u8]) -> Option<Self> {
         let mut edit = VersionEdit::new();
         let mut pos = 0;

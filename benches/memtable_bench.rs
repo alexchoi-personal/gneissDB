@@ -1,6 +1,5 @@
-use bytes::Bytes;
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput};
-use rocksdb_rs::{Db, Options};
+use gneissdb::{Db, Options};
 use tempfile::tempdir;
 
 fn memtable_insert(c: &mut Criterion) {
@@ -13,7 +12,9 @@ fn memtable_insert(c: &mut Criterion) {
             b.iter_batched(
                 || {
                     let dir = tempdir().unwrap();
-                    let db = rt.block_on(Db::open(dir.path(), Options::default())).unwrap();
+                    let db = rt
+                        .block_on(Db::open(dir.path(), Options::default()))
+                        .unwrap();
                     (dir, db, size)
                 },
                 |(_dir, db, size)| {
@@ -42,7 +43,9 @@ fn memtable_lookup(c: &mut Criterion) {
             b.iter_batched(
                 || {
                     let dir = tempdir().unwrap();
-                    let db = rt.block_on(Db::open(dir.path(), Options::default())).unwrap();
+                    let db = rt
+                        .block_on(Db::open(dir.path(), Options::default()))
+                        .unwrap();
                     rt.block_on(async {
                         for i in 0..size {
                             let key = format!("key{:08}", i);
@@ -76,7 +79,9 @@ fn memtable_mixed(c: &mut Criterion) {
         b.iter_batched(
             || {
                 let dir = tempdir().unwrap();
-                let db = rt.block_on(Db::open(dir.path(), Options::default())).unwrap();
+                let db = rt
+                    .block_on(Db::open(dir.path(), Options::default()))
+                    .unwrap();
                 rt.block_on(async {
                     for i in 0..500 {
                         let key = format!("key{:08}", i);
@@ -91,10 +96,10 @@ fn memtable_mixed(c: &mut Criterion) {
                     for i in 500..1000 {
                         let key = format!("key{:08}", i);
                         let value = format!("value{:08}", i);
-                        db.put(&key, value).await.unwrap();
+                        db.put(key, value).await.unwrap();
 
                         let read_key = format!("key{:08}", i - 500);
-                        let _ = db.get(&read_key).await.unwrap();
+                        let _ = db.get(read_key).await.unwrap();
                     }
                 });
             },

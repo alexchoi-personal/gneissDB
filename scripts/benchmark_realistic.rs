@@ -1,5 +1,5 @@
-use rocksdb::{DB, Options as RocksOptions, WriteOptions as RocksWriteOptions};
 use gneissdb::{Db, Options, WriteOptions};
+use rocksdb::{Options as RocksOptions, WriteOptions as RocksWriteOptions, DB};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;

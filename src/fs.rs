@@ -2,13 +2,13 @@ use crate::error::Result;
 use async_trait::async_trait;
 use bytes::Bytes;
 use std::path::{Path, PathBuf};
-use tokio::fs::{self, File, OpenOptions};
-use tokio::io::AsyncWriteExt;
+use tokio::fs;
 
 #[cfg(unix)]
 use std::os::unix::fs::FileExt;
 
 #[async_trait]
+#[allow(dead_code)]
 pub(crate) trait FileSystem: Send + Sync {
     async fn create_file(&self, path: &Path) -> Result<Box<dyn WritableFile>>;
     async fn open_file(&self, path: &Path) -> Result<Box<dyn RandomAccessFile>>;
@@ -54,21 +54,17 @@ impl FileSystem for RealFileSystem {
     async fn open_file(&self, path: &Path) -> Result<Box<dyn RandomAccessFile>> {
         let file = std::fs::File::open(path)?;
         let size = file.metadata()?.len();
-        
+
         #[cfg(unix)]
         {
             if size > 0 {
-                let mmap = unsafe {
-                    memmap2::MmapOptions::new()
-                        .len(size as usize)
-                        .map(&file)
-                };
+                let mmap = unsafe { memmap2::MmapOptions::new().len(size as usize).map(&file) };
                 if let Ok(mmap) = mmap {
                     return Ok(Box::new(MmapRandomAccessFile::new(mmap, size)));
                 }
             }
         }
-        
+
         Ok(Box::new(RealRandomAccessFile { file, size }))
     }
 
@@ -155,9 +151,9 @@ impl WritableFile for RealWritableFile {
         use std::io::Write;
         let mut writer = self.writer;
         writer.flush()?;
-        let file = writer.into_inner().map_err(|e| {
-            std::io::Error::new(std::io::ErrorKind::Other, e.to_string())
-        })?;
+        let file = writer
+            .into_inner()
+            .map_err(|e| std::io::Error::other(e.to_string()))?;
         file.sync_data()?;
         Ok(())
     }

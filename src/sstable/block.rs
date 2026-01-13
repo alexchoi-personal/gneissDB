@@ -12,11 +12,9 @@ pub(crate) struct BlockBuilder {
 
 impl BlockBuilder {
     pub(crate) fn new(restart_interval: usize) -> Self {
-        let mut restarts = Vec::new();
-        restarts.push(0);
         Self {
             buffer: BytesMut::new(),
-            restarts,
+            restarts: vec![0],
             last_key: Vec::new(),
             entry_count: 0,
             restart_interval,
@@ -36,8 +34,10 @@ impl BlockBuilder {
         let non_shared = key.len() - shared;
 
         self.buffer.extend_from_slice(&encode_varint(shared as u64));
-        self.buffer.extend_from_slice(&encode_varint(non_shared as u64));
-        self.buffer.extend_from_slice(&encode_varint(value.len() as u64));
+        self.buffer
+            .extend_from_slice(&encode_varint(non_shared as u64));
+        self.buffer
+            .extend_from_slice(&encode_varint(value.len() as u64));
         self.buffer.extend_from_slice(&key[shared..]);
         self.buffer.extend_from_slice(value);
 
@@ -76,6 +76,7 @@ impl BlockBuilder {
         self.entry_count == 0
     }
 
+    #[allow(dead_code)]
     pub(crate) fn reset(&mut self) {
         self.buffer.clear();
         self.restarts.clear();
@@ -131,7 +132,7 @@ impl Block {
     pub(crate) fn seek(&self, target: &[u8]) -> BlockIterator {
         let restart_idx = self.find_restart_point(target);
         let start_pos = self.get_restart(restart_idx);
-        
+
         let mut iter = BlockIterator {
             data: self.data.clone(),
             restart_offset: self.restart_offset,
@@ -160,7 +161,7 @@ impl Block {
         while left < right {
             let mid = left + (right - left) / 2;
             let restart_pos = self.get_restart(mid);
-            
+
             if let Some(key) = self.decode_key_at(restart_pos) {
                 if key.as_ref() < target {
                     left = mid + 1;
@@ -172,7 +173,11 @@ impl Block {
             }
         }
 
-        if left > 0 { left - 1 } else { 0 }
+        if left > 0 {
+            left - 1
+        } else {
+            0
+        }
     }
 
     fn decode_key_at(&self, pos: usize) -> Option<Bytes> {
@@ -209,6 +214,7 @@ impl Block {
         u32::from_le_bytes(self.data[offset..offset + 4].try_into().unwrap()) as usize
     }
 
+    #[allow(dead_code)]
     pub(crate) fn iter(&self) -> BlockIterator {
         BlockIterator {
             data: self.data.clone(),
@@ -275,7 +281,8 @@ impl Iterator for BlockIterator {
 
         self.current_key.truncate(shared as usize);
         let key_end = self.pos + non_shared as usize;
-        self.current_key.extend_from_slice(&self.data[self.pos..key_end]);
+        self.current_key
+            .extend_from_slice(&self.data[self.pos..key_end]);
         self.pos = key_end;
 
         let value_end = self.pos + value_len as usize;
@@ -303,7 +310,8 @@ impl BlockIterator {
 
         self.current_key.truncate(shared as usize);
         let key_end = self.pos + non_shared as usize;
-        self.current_key.extend_from_slice(&self.data[self.pos..key_end]);
+        self.current_key
+            .extend_from_slice(&self.data[self.pos..key_end]);
         self.pos = key_end;
 
         let value_start = self.pos;
@@ -364,7 +372,7 @@ mod tests {
         let data = builder.finish();
 
         let block = Block::new(data).unwrap();
-        
+
         let mut iter = block.seek(b"key10");
         let (k, _) = iter.next().unwrap();
         assert_eq!(k.as_ref(), b"key10");
@@ -387,7 +395,7 @@ mod tests {
         let data = builder.finish();
 
         let block = Block::new(data).unwrap();
-        
+
         let mut iter = block.seek(b"key15");
         let (k, _) = iter.next().unwrap();
         assert_eq!(k.as_ref(), b"key20");

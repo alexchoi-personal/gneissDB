@@ -1,5 +1,5 @@
-use rocksdb::{DB, Options as RocksOptions, WriteOptions as RocksWriteOptions};
 use gneissdb::{Db, Options};
+use rocksdb::{Options as RocksOptions, WriteOptions as RocksWriteOptions, DB};
 use std::time::Instant;
 use tempfile::tempdir;
 
@@ -35,17 +35,20 @@ async fn main() {
         for i in 0..count {
             let key = format!("key{:08}", i);
             let value = format!("value{:08}", i);
-            db.put_opt(key.as_bytes(), value.as_bytes(), &write_opts).unwrap();
+            db.put_opt(key.as_bytes(), value.as_bytes(), &write_opts)
+                .unwrap();
         }
     }
     let rocksdb_time = start.elapsed();
 
     println!("Results (no sync writes):");
-    println!("  rocksdb-rs: {:.2}ms ({:.0} ops/sec)",
+    println!(
+        "  rocksdb-rs: {:.2}ms ({:.0} ops/sec)",
         gneissdb_time.as_secs_f64() * 1000.0,
         count as f64 / gneissdb_time.as_secs_f64()
     );
-    println!("  RocksDB:    {:.2}ms ({:.0} ops/sec)",
+    println!(
+        "  RocksDB:    {:.2}ms ({:.0} ops/sec)",
         rocksdb_time.as_secs_f64() * 1000.0,
         count as f64 / rocksdb_time.as_secs_f64()
     );
@@ -66,7 +69,9 @@ async fn main() {
         let opts = Options::default().sync_writes(false);
         let db = Db::open(dir1.path(), opts).await.unwrap();
         for i in 0..count {
-            db.put(format!("key{:08}", i), format!("value{:08}", i)).await.unwrap();
+            db.put(format!("key{:08}", i), format!("value{:08}", i))
+                .await
+                .unwrap();
         }
         db.close().await.unwrap();
     }
@@ -75,7 +80,11 @@ async fn main() {
         opts.create_if_missing(true);
         let db = DB::open(&opts, dir2.path()).unwrap();
         for i in 0..count {
-            db.put(format!("key{:08}", i).as_bytes(), format!("value{:08}", i).as_bytes()).unwrap();
+            db.put(
+                format!("key{:08}", i).as_bytes(),
+                format!("value{:08}", i).as_bytes(),
+            )
+            .unwrap();
         }
     }
 
@@ -101,11 +110,13 @@ async fn main() {
     let rocksdb_read = start.elapsed();
 
     println!("Results (reads from recovered data):");
-    println!("  rocksdb-rs: {:.2}ms ({:.0} ops/sec)",
+    println!(
+        "  rocksdb-rs: {:.2}ms ({:.0} ops/sec)",
         gneissdb_read.as_secs_f64() * 1000.0,
         count as f64 / gneissdb_read.as_secs_f64()
     );
-    println!("  RocksDB:    {:.2}ms ({:.0} ops/sec)",
+    println!(
+        "  RocksDB:    {:.2}ms ({:.0} ops/sec)",
         rocksdb_read.as_secs_f64() * 1000.0,
         count as f64 / rocksdb_read.as_secs_f64()
     );

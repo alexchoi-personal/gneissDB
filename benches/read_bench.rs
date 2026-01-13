@@ -1,5 +1,5 @@
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput};
-use rocksdb_rs::{Db, Options};
+use gneissdb::{Db, Options};
 use tempfile::tempdir;
 
 fn read_from_memtable(c: &mut Criterion) {
@@ -12,7 +12,9 @@ fn read_from_memtable(c: &mut Criterion) {
             b.iter_batched(
                 || {
                     let dir = tempdir().unwrap();
-                    let db = rt.block_on(Db::open(dir.path(), Options::default())).unwrap();
+                    let db = rt
+                        .block_on(Db::open(dir.path(), Options::default()))
+                        .unwrap();
                     rt.block_on(async {
                         for i in 0..size {
                             db.put(format!("key{:08}", i), format!("value{:08}", i))

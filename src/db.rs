@@ -11,7 +11,7 @@ use crate::options::{IoEngine, Options, ReadOptions, WriteOptions};
 use crate::sstable::SstableBuilder;
 use crate::table_cache::TableCache;
 use crate::wal::{BatchOp, WalReader, WalRecord, WalWriter};
-use crate::{WriteBatch, BATCH_TYPE_PUT, BATCH_TYPE_DELETE};
+use crate::{WriteBatch, BATCH_TYPE_PUT};
 use bytes::Bytes;
 use parking_lot::{Mutex, RwLock};
 use std::collections::VecDeque;
@@ -29,12 +29,14 @@ pub(crate) struct DbInner {
     group_commit: Option<GroupCommitQueue>,
     cache: Arc<BlockCache>,
     table_cache: Arc<TableCache>,
+    #[allow(dead_code)]
     write_lock: Mutex<()>,
     compaction_picker: CompactionPicker,
     shutdown: Arc<std::sync::atomic::AtomicBool>,
 }
 
 #[derive(Clone)]
+#[allow(dead_code)]
 pub(crate) enum DbBatchOp {
     Put(Bytes, Bytes),
     Delete(Bytes),
@@ -53,7 +55,7 @@ impl DbInner {
         }
 
         let cache = BlockCache::new(options.block_cache_size);
-        let mut version_set = VersionSet::new(options.max_levels);
+        let version_set = VersionSet::new(options.max_levels);
 
         let entries = fs.read_dir(path).await?;
         let mut max_file_number = 0u64;
@@ -102,7 +104,10 @@ impl DbInner {
 
         db.recover().await?;
 
-        let wal_path = path.join(format!("{:06}.wal", db.version_set.read().next_file_number()));
+        let wal_path = path.join(format!(
+            "{:06}.wal",
+            db.version_set.read().next_file_number()
+        ));
         let wal_file = db.fs.create_file(&wal_path).await?;
         let wal_writer = WalWriter::new(wal_file, wal_path, false);
         *db.wal.lock().await = Some(wal_writer);
@@ -155,7 +160,9 @@ impl DbInner {
                             }
                         }
                         if ops_len > 0 {
-                            self.version_set.write().set_last_sequence(sequence + ops_len as u64 - 1);
+                            self.version_set
+                                .write()
+                                .set_last_sequence(sequence + ops_len as u64 - 1);
                         }
                     }
                 }
@@ -165,12 +172,7 @@ impl DbInner {
         Ok(())
     }
 
-    pub(crate) async fn put(
-        &self,
-        key: Bytes,
-        value: Bytes,
-        options: WriteOptions,
-    ) -> Result<()> {
+    pub(crate) async fn put(&self, key: Bytes, value: Bytes, options: WriteOptions) -> Result<()> {
         self.check_write_stall().await?;
 
         let sequence = self.version_set.read().increment_sequence();
@@ -263,12 +265,7 @@ impl DbInner {
         Ok(None)
     }
 
-    pub(crate) fn scan(
-        &self,
-        start: &[u8],
-        end: &[u8],
-        limit: usize,
-    ) -> Vec<(Bytes, Bytes)> {
+    pub(crate) fn scan(&self, start: &[u8], end: &[u8], limit: usize) -> Vec<(Bytes, Bytes)> {
         let sequence = self.version_set.read().last_sequence();
         let memtable = self.memtable.read().clone();
         memtable.scan_range(start, end, sequence, limit)
@@ -314,6 +311,7 @@ impl DbInner {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub(crate) async fn write_batch(
         &self,
         ops: Vec<DbBatchOp>,
@@ -418,13 +416,23 @@ impl DbInner {
             let op_type = data[offset];
             offset += 1;
 
-            let key_len = u32::from_le_bytes([data[offset], data[offset+1], data[offset+2], data[offset+3]]) as usize;
+            let key_len = u32::from_le_bytes([
+                data[offset],
+                data[offset + 1],
+                data[offset + 2],
+                data[offset + 3],
+            ]) as usize;
             offset += 4;
             let key = &data[offset..offset + key_len];
             offset += key_len;
 
             if op_type == BATCH_TYPE_PUT {
-                let val_len = u32::from_le_bytes([data[offset], data[offset+1], data[offset+2], data[offset+3]]) as usize;
+                let val_len = u32::from_le_bytes([
+                    data[offset],
+                    data[offset + 1],
+                    data[offset + 2],
+                    data[offset + 3],
+                ]) as usize;
                 offset += 4;
                 let value = data.slice(offset..offset + val_len);
                 offset += val_len;
@@ -448,13 +456,23 @@ impl DbInner {
             while offset < data.len() {
                 let op_type = data[offset];
                 offset += 1;
-                let key_len = u32::from_le_bytes([data[offset], data[offset+1], data[offset+2], data[offset+3]]) as usize;
+                let key_len = u32::from_le_bytes([
+                    data[offset],
+                    data[offset + 1],
+                    data[offset + 2],
+                    data[offset + 3],
+                ]) as usize;
                 offset += 4;
                 let key = data.slice(offset..offset + key_len);
                 offset += key_len;
 
                 if op_type == BATCH_TYPE_PUT {
-                    let val_len = u32::from_le_bytes([data[offset], data[offset+1], data[offset+2], data[offset+3]]) as usize;
+                    let val_len = u32::from_le_bytes([
+                        data[offset],
+                        data[offset + 1],
+                        data[offset + 2],
+                        data[offset + 3],
+                    ]) as usize;
                     offset += 4;
                     let value = data.slice(offset..offset + val_len);
                     offset += val_len;
@@ -463,11 +481,20 @@ impl DbInner {
                     batch_ops.push(BatchOp::Delete { key });
                 }
             }
-            gc.submit(WriteOp::Batch { sequence, ops: batch_ops }, true).await?;
+            gc.submit(
+                WriteOp::Batch {
+                    sequence,
+                    ops: batch_ops,
+                },
+                true,
+            )
+            .await?;
         }
 
         if count > 1 {
-            self.version_set.write().set_last_sequence(sequence + count as u64 - 1);
+            self.version_set
+                .write()
+                .set_last_sequence(sequence + count as u64 - 1);
         }
 
         if memtable.is_full() {
@@ -556,7 +583,10 @@ impl DbInner {
         }
 
         {
-            let wal_path = self.path.join(format!("{:06}.wal", self.version_set.read().next_file_number()));
+            let wal_path = self.path.join(format!(
+                "{:06}.wal",
+                self.version_set.read().next_file_number()
+            ));
             let wal_file = self.fs.create_file(&wal_path).await?;
             let new_wal = WalWriter::new(wal_file, wal_path, false);
             *self.wal.lock().await = Some(new_wal);
@@ -589,7 +619,8 @@ impl DbInner {
     }
 
     pub(crate) async fn close(self) -> Result<()> {
-        self.shutdown.store(true, std::sync::atomic::Ordering::SeqCst);
+        self.shutdown
+            .store(true, std::sync::atomic::Ordering::SeqCst);
 
         if let Some(group_commit) = self.group_commit {
             group_commit.shutdown().await;
@@ -675,9 +706,17 @@ mod tests {
 
         db.write_batch(ops, WriteOptions::default()).await.unwrap();
 
-        assert!(db.get(b"k1", ReadOptions::default()).await.unwrap().is_none());
+        assert!(db
+            .get(b"k1", ReadOptions::default())
+            .await
+            .unwrap()
+            .is_none());
         assert_eq!(
-            db.get(b"k2", ReadOptions::default()).await.unwrap().unwrap().as_ref(),
+            db.get(b"k2", ReadOptions::default())
+                .await
+                .unwrap()
+                .unwrap()
+                .as_ref(),
             b"v2"
         );
 
@@ -880,7 +919,11 @@ mod tests {
         .await
         .unwrap();
 
-        let value = db.get(b"key1", ReadOptions::default()).await.unwrap().unwrap();
+        let value = db
+            .get(b"key1", ReadOptions::default())
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(value.as_ref(), b"value2");
 
         db.close().await.unwrap();
@@ -891,7 +934,10 @@ mod tests {
         let dir = tempdir().unwrap();
         let db = DbInner::open(dir.path(), Options::default()).await.unwrap();
 
-        let value = db.get(b"nonexistent", ReadOptions::default()).await.unwrap();
+        let value = db
+            .get(b"nonexistent", ReadOptions::default())
+            .await
+            .unwrap();
         assert!(value.is_none());
 
         db.close().await.unwrap();

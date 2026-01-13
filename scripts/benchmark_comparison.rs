@@ -1,5 +1,5 @@
-use rocksdb::{DB, Options as RocksOptions};
 use gneissdb::{Db, Options};
+use rocksdb::{Options as RocksOptions, DB};
 use std::time::{Duration, Instant};
 use tempfile::tempdir;
 
@@ -51,7 +51,9 @@ async fn bench_writes(count: usize) -> BenchResult {
 
         let start = Instant::now();
         {
-            let db = Db::open(dir1.path(), Options::default().sync_writes(false)).await.unwrap();
+            let db = Db::open(dir1.path(), Options::default().sync_writes(false))
+                .await
+                .unwrap();
             for i in 0..count {
                 let key = format!("key{:08}", i);
                 let value = format!("value{:08}", i);
@@ -92,7 +94,9 @@ async fn bench_reads(count: usize) -> BenchResult {
     let dir2 = tempdir().unwrap();
 
     {
-        let db = Db::open(dir1.path(), Options::default().sync_writes(false)).await.unwrap();
+        let db = Db::open(dir1.path(), Options::default().sync_writes(false))
+            .await
+            .unwrap();
         for i in 0..count {
             let key = format!("key{:08}", i);
             let value = format!("value{:08}", i);
@@ -155,7 +159,9 @@ async fn bench_random_reads(count: usize) -> BenchResult {
     let dir2 = tempdir().unwrap();
 
     {
-        let db = Db::open(dir1.path(), Options::default().sync_writes(false)).await.unwrap();
+        let db = Db::open(dir1.path(), Options::default().sync_writes(false))
+            .await
+            .unwrap();
         for i in 0..count {
             let key = format!("key{:08}", i);
             let value = format!("value{:08}", i);
@@ -225,7 +231,9 @@ async fn bench_mixed(count: usize) -> BenchResult {
 
         let start = Instant::now();
         {
-            let db = Db::open(dir1.path(), Options::default().sync_writes(false)).await.unwrap();
+            let db = Db::open(dir1.path(), Options::default().sync_writes(false))
+                .await
+                .unwrap();
             for i in 0..count {
                 let key = format!("key{:08}", i);
                 let value = format!("value{:08}", i);
@@ -280,7 +288,9 @@ async fn bench_large_values(count: usize, value_size: usize) -> BenchResult {
 
         let start = Instant::now();
         {
-            let db = Db::open(dir1.path(), Options::default().sync_writes(false)).await.unwrap();
+            let db = Db::open(dir1.path(), Options::default().sync_writes(false))
+                .await
+                .unwrap();
             for i in 0..count {
                 let key = format!("key{:08}", i);
                 db.put(key, value.clone()).await.unwrap();
@@ -317,9 +327,15 @@ async fn bench_large_values(count: usize, value_size: usize) -> BenchResult {
 #[tokio::main]
 async fn main() {
     println!("╔════════════════════════════════════════════════════════════════════════════╗");
-    println!("║         RocksDB vs rocksdb-rs Benchmark (median of {} iterations)         ║", ITERATIONS);
+    println!(
+        "║         RocksDB vs rocksdb-rs Benchmark (median of {} iterations)         ║",
+        ITERATIONS
+    );
     println!("╠════════════════════════════════════════════════════════════════════════════╣");
-    println!("║ {:<28} │ {:>10} │ {:>10} │ {:>12} ║", "Benchmark", "rocksdb-rs", "RocksDB", "Comparison");
+    println!(
+        "║ {:<28} │ {:>10} │ {:>10} │ {:>12} ║",
+        "Benchmark", "rocksdb-rs", "RocksDB", "Comparison"
+    );
     println!("╠════════════════════════════════════════════════════════════════════════════╣");
 
     let results = vec![

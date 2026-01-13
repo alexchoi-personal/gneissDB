@@ -5,13 +5,13 @@ use crate::fs::{FileSystem, RandomAccessFile, WritableFile};
 use async_trait::async_trait;
 use bytes::Bytes;
 use io_uring::{opcode, types, IoUring};
+use parking_lot::Mutex;
 use std::fs::{File, OpenOptions};
 use std::io;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use parking_lot::Mutex;
 
 const RING_SIZE: u32 = 1024;
 const WRITE_BUFFER_SIZE: usize = 64 * 1024;
@@ -28,7 +28,7 @@ impl IoUringContext {
             .build(RING_SIZE)
             .or_else(|_| IoUring::new(RING_SIZE))
             .map_err(|e| Error::Io(io::Error::new(io::ErrorKind::Other, e)))?;
-        
+
         Ok(Self {
             inner: Mutex::new(ring),
             next_user_data: AtomicU64::new(1),
@@ -42,15 +42,11 @@ impl IoUringContext {
     fn write(&self, fd: RawFd, buf: &[u8], offset: u64) -> Result<usize> {
         let mut ring = self.inner.lock();
         let user_data = self.next_id();
-        
-        let write_op = opcode::Write::new(
-            types::Fd(fd),
-            buf.as_ptr(),
-            buf.len() as u32,
-        )
-        .offset(offset)
-        .build()
-        .user_data(user_data);
+
+        let write_op = opcode::Write::new(types::Fd(fd), buf.as_ptr(), buf.len() as u32)
+            .offset(offset)
+            .build()
+            .user_data(user_data);
 
         unsafe {
             ring.submission()
@@ -62,7 +58,9 @@ impl IoUringContext {
             .map_err(|e| Error::Io(io::Error::new(io::ErrorKind::Other, e)))?;
 
         let cqe = loop {
-            let cqe = ring.completion().next()
+            let cqe = ring
+                .completion()
+                .next()
                 .ok_or_else(|| Error::Io(io::Error::new(io::ErrorKind::Other, "No completion")))?;
             if cqe.user_data() == user_data {
                 break cqe;
@@ -80,15 +78,11 @@ impl IoUringContext {
     fn read(&self, fd: RawFd, buf: &mut [u8], offset: u64) -> Result<usize> {
         let mut ring = self.inner.lock();
         let user_data = self.next_id();
-        
-        let read_op = opcode::Read::new(
-            types::Fd(fd),
-            buf.as_mut_ptr(),
-            buf.len() as u32,
-        )
-        .offset(offset)
-        .build()
-        .user_data(user_data);
+
+        let read_op = opcode::Read::new(types::Fd(fd), buf.as_mut_ptr(), buf.len() as u32)
+            .offset(offset)
+            .build()
+            .user_data(user_data);
 
         unsafe {
             ring.submission()
@@ -100,7 +94,9 @@ impl IoUringContext {
             .map_err(|e| Error::Io(io::Error::new(io::ErrorKind::Other, e)))?;
 
         let cqe = loop {
-            let cqe = ring.completion().next()
+            let cqe = ring
+                .completion()
+                .next()
                 .ok_or_else(|| Error::Io(io::Error::new(io::ErrorKind::Other, "No completion")))?;
             if cqe.user_data() == user_data {
                 break cqe;
@@ -118,7 +114,7 @@ impl IoUringContext {
     fn fsync(&self, fd: RawFd) -> Result<()> {
         let mut ring = self.inner.lock();
         let user_data = self.next_id();
-        
+
         let fsync_op = opcode::Fsync::new(types::Fd(fd))
             .build()
             .user_data(user_data);
@@ -133,7 +129,9 @@ impl IoUringContext {
             .map_err(|e| Error::Io(io::Error::new(io::ErrorKind::Other, e)))?;
 
         let cqe = loop {
-            let cqe = ring.completion().next()
+            let cqe = ring
+                .completion()
+                .next()
                 .ok_or_else(|| Error::Io(io::Error::new(io::ErrorKind::Other, "No completion")))?;
             if cqe.user_data() == user_data {
                 break cqe;
@@ -151,7 +149,7 @@ impl IoUringContext {
     fn fdatasync(&self, fd: RawFd) -> Result<()> {
         let mut ring = self.inner.lock();
         let user_data = self.next_id();
-        
+
         let fsync_op = opcode::Fsync::new(types::Fd(fd))
             .flags(types::FsyncFlags::DATASYNC)
             .build()
@@ -167,7 +165,9 @@ impl IoUringContext {
             .map_err(|e| Error::Io(io::Error::new(io::ErrorKind::Other, e)))?;
 
         let cqe = loop {
-            let cqe = ring.completion().next()
+            let cqe = ring
+                .completion()
+                .next()
                 .ok_or_else(|| Error::Io(io::Error::new(io::ErrorKind::Other, "No completion")))?;
             if cqe.user_data() == user_data {
                 break cqe;
@@ -205,16 +205,21 @@ impl FileSystem for IoUringFileSystem {
     async fn open_file(&self, path: &Path) -> Result<Box<dyn RandomAccessFile>> {
         let file = File::open(path)?;
         let size = file.metadata()?.len();
-        Ok(Box::new(IoUringRandomAccessFile::new(file, size, self.ctx.clone())?))
+        Ok(Box::new(IoUringRandomAccessFile::new(
+            file,
+            size,
+            self.ctx.clone(),
+        )?))
     }
 
     async fn open_writable(&self, path: &Path) -> Result<Box<dyn WritableFile>> {
-        let file = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .open(path)?;
+        let file = OpenOptions::new().create(true).write(true).open(path)?;
         let offset = file.metadata()?.len();
-        Ok(Box::new(IoUringWritableFile::with_offset(file, self.ctx.clone(), offset)?))
+        Ok(Box::new(IoUringWritableFile::with_offset(
+            file,
+            self.ctx.clone(),
+            offset,
+        )?))
     }
 
     async fn delete_file(&self, path: &Path) -> Result<()> {
@@ -253,18 +258,20 @@ impl FileSystem for IoUringFileSystem {
         let file = File::open(path)?;
         let size = file.metadata()?.len() as usize;
         let fd = file.as_raw_fd();
-        
+
         let mut buf = vec![0u8; size];
         let mut total_read = 0;
-        
+
         while total_read < size {
-            let n = self.ctx.read(fd, &mut buf[total_read..], total_read as u64)?;
+            let n = self
+                .ctx
+                .read(fd, &mut buf[total_read..], total_read as u64)?;
             if n == 0 {
                 break;
             }
             total_read += n;
         }
-        
+
         buf.truncate(total_read);
         Ok(Bytes::from(buf))
     }
@@ -272,13 +279,15 @@ impl FileSystem for IoUringFileSystem {
     async fn write_file(&self, path: &Path, data: &[u8]) -> Result<()> {
         let file = File::create(path)?;
         let fd = file.as_raw_fd();
-        
+
         let mut total_written = 0;
         while total_written < data.len() {
-            let n = self.ctx.write(fd, &data[total_written..], total_written as u64)?;
+            let n = self
+                .ctx
+                .write(fd, &data[total_written..], total_written as u64)?;
             total_written += n;
         }
-        
+
         self.ctx.fdatasync(fd)?;
         Ok(())
     }
@@ -316,7 +325,9 @@ impl IoUringWritableFile {
 
         let mut written = 0;
         while written < self.buffer.len() {
-            let n = self.ctx.write(self.fd, &self.buffer[written..], self.offset)?;
+            let n = self
+                .ctx
+                .write(self.fd, &self.buffer[written..], self.offset)?;
             if n == 0 {
                 return Err(Error::Io(io::Error::new(
                     io::ErrorKind::WriteZero,
@@ -338,7 +349,7 @@ impl WritableFile for IoUringWritableFile {
         if self.buffer.len() + data.len() > WRITE_BUFFER_SIZE {
             self.flush_buffer()?;
         }
-        
+
         if data.len() >= WRITE_BUFFER_SIZE {
             let mut written = 0;
             while written < data.len() {
@@ -355,7 +366,7 @@ impl WritableFile for IoUringWritableFile {
         } else {
             self.buffer.extend_from_slice(data);
         }
-        
+
         Ok(())
     }
 
@@ -383,7 +394,12 @@ pub(crate) struct IoUringRandomAccessFile {
 impl IoUringRandomAccessFile {
     fn new(file: File, size: u64, ctx: Arc<IoUringContext>) -> Result<Self> {
         let fd = file.as_raw_fd();
-        Ok(Self { file, fd, ctx, size })
+        Ok(Self {
+            file,
+            fd,
+            ctx,
+            size,
+        })
     }
 }
 
@@ -397,9 +413,11 @@ impl RandomAccessFile for IoUringRandomAccessFile {
 
         let mut buf = vec![0u8; actual_len];
         let mut total_read = 0;
-        
+
         while total_read < actual_len {
-            let n = self.ctx.read(self.fd, &mut buf[total_read..], offset + total_read as u64)?;
+            let n = self
+                .ctx
+                .read(self.fd, &mut buf[total_read..], offset + total_read as u64)?;
             if n == 0 {
                 break;
             }
@@ -473,7 +491,7 @@ mod tests {
         let path = dir.path().join("test.txt");
 
         let mut file = fs.create_file(&path).await.unwrap();
-        
+
         let chunk = vec![b'x'; 100 * 1024];
         file.append(&chunk).await.unwrap();
         file.sync().await.unwrap();
@@ -490,9 +508,11 @@ mod tests {
         let path = dir.path().join("test.txt");
 
         let mut file = fs.create_file(&path).await.unwrap();
-        
+
         for i in 0..1000 {
-            file.append(format!("line {}\n", i).as_bytes()).await.unwrap();
+            file.append(format!("line {}\n", i).as_bytes())
+                .await
+                .unwrap();
         }
         file.sync().await.unwrap();
         file.close().await.unwrap();
@@ -505,22 +525,22 @@ mod tests {
     async fn test_iouring_shared_context() {
         let fs = IoUringFileSystem::new().unwrap();
         let dir = tempdir().unwrap();
-        
+
         let path1 = dir.path().join("test1.txt");
         let path2 = dir.path().join("test2.txt");
 
         let mut file1 = fs.create_file(&path1).await.unwrap();
         let mut file2 = fs.create_file(&path2).await.unwrap();
-        
+
         file1.append(b"file1 content").await.unwrap();
         file2.append(b"file2 content").await.unwrap();
-        
+
         file1.close().await.unwrap();
         file2.close().await.unwrap();
 
         let data1 = fs.read_file(&path1).await.unwrap();
         let data2 = fs.read_file(&path2).await.unwrap();
-        
+
         assert_eq!(&data1[..], b"file1 content");
         assert_eq!(&data2[..], b"file2 content");
     }
@@ -534,7 +554,7 @@ mod tests {
         fs.write_file(&path, b"hello").await.unwrap();
 
         let file = fs.open_file(&path).await.unwrap();
-        
+
         let data = file.read(0, 100).await.unwrap();
         assert_eq!(&data[..], b"hello");
 

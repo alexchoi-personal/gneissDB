@@ -1,6 +1,6 @@
 use bytes::Bytes;
-use rocksdb::{DB, Options as RocksOptions, WriteOptions as RocksWriteOptions};
 use gneissdb::{Db, Options, WriteOptions};
+use rocksdb::{Options as RocksOptions, WriteOptions as RocksWriteOptions, DB};
 use std::sync::Arc;
 use std::time::Instant;
 use tempfile::tempdir;
@@ -281,7 +281,11 @@ async fn bench_concurrent_write_nosync() -> BenchResult {
         total as f64 / elapsed.as_secs_f64()
     };
 
-    BenchResult::new("Concurrent Write (no sync, 8 threads)", gneissdb_ops, rocksdb_ops)
+    BenchResult::new(
+        "Concurrent Write (no sync, 8 threads)",
+        gneissdb_ops,
+        rocksdb_ops,
+    )
 }
 
 async fn bench_concurrent_write_sync() -> BenchResult {
@@ -357,8 +361,12 @@ async fn bench_concurrent_write_sync() -> BenchResult {
         total as f64 / elapsed.as_secs_f64()
     };
 
-    BenchResult::new("Concurrent Write (sync, 8 threads)", gneissdb_ops, rocksdb_ops)
-        .with_note("RocksDB not actually syncing on macOS (missing F_FULLFSYNC)")
+    BenchResult::new(
+        "Concurrent Write (sync, 8 threads)",
+        gneissdb_ops,
+        rocksdb_ops,
+    )
+    .with_note("RocksDB not actually syncing on macOS (missing F_FULLFSYNC)")
 }
 
 async fn bench_batch_write() -> BenchResult {
@@ -376,11 +384,14 @@ async fn bench_batch_write() -> BenchResult {
 
     let gneissdb_ops = {
         let dir = tempdir().unwrap();
-        let db = Db::open(dir.path(), Options::default()
-            .sync_writes(false)
-            .memtable_size(256 * 1024 * 1024))
-            .await
-            .unwrap();
+        let db = Db::open(
+            dir.path(),
+            Options::default()
+                .sync_writes(false)
+                .memtable_size(256 * 1024 * 1024),
+        )
+        .await
+        .unwrap();
 
         let start = Instant::now();
         for batch_keys in &keys {

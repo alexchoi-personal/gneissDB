@@ -45,11 +45,7 @@ impl CompactionPicker {
     }
 
     fn pick_l0_compaction(&self, version: &Version) -> CompactionTask {
-        let input_files: Vec<FileMetadata> = version
-            .get_files_at_level(0)
-            .iter()
-            .cloned()
-            .collect();
+        let input_files: Vec<FileMetadata> = version.get_files_at_level(0).to_vec();
 
         CompactionTask {
             level: 0,
@@ -77,6 +73,7 @@ impl CompactionPicker {
         size
     }
 
+    #[allow(dead_code)]
     pub(crate) fn needs_compaction(&self, version: &Version) -> bool {
         self.pick_compaction(version).is_some()
     }
@@ -85,9 +82,9 @@ impl CompactionPicker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bytes::Bytes;
     use crate::manifest::VersionEdit;
     use crate::manifest::VersionSet;
+    use bytes::Bytes;
 
     #[test]
     fn test_picker_l0_compaction() {

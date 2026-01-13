@@ -1,9 +1,9 @@
+use crate::cache::BlockCache;
 use crate::compaction::CompactionTask;
 use crate::error::Result;
 use crate::fs::FileSystem;
 use crate::manifest::VersionEdit;
 use crate::sstable::{SstableBuilder, SstableReader};
-use crate::cache::BlockCache;
 use crate::types::InternalKey;
 use bytes::Bytes;
 use std::cmp::Ordering;
@@ -46,13 +46,14 @@ impl LevelCompactor {
         for file in &task.input_files {
             let path = self.sst_path(file.file_number);
             let file_handle = self.fs.open_file(&path).await?;
-            let reader = SstableReader::open(file_handle, file.file_number, self.cache.clone()).await?;
+            let reader =
+                SstableReader::open(file_handle, file.file_number, self.cache.clone()).await?;
             readers.push(reader);
         }
 
         let output_path = self.sst_path(next_file_number);
         let output_file = self.fs.create_file(&output_path).await?;
-        let mut builder = SstableBuilder::new(
+        let builder = SstableBuilder::new(
             output_file,
             output_path,
             self.block_size,
@@ -60,7 +61,7 @@ impl LevelCompactor {
             1000,
         );
 
-        let mut heap: BinaryHeap<MergeEntry> = BinaryHeap::new();
+        let _heap: BinaryHeap<MergeEntry> = BinaryHeap::new();
         let mut iterators: Vec<_> = Vec::new();
 
         for (idx, _reader) in readers.iter().enumerate() {
@@ -91,6 +92,7 @@ impl LevelCompactor {
     }
 }
 
+#[allow(dead_code)]
 struct MergeEntry {
     key: InternalKey,
     value: Bytes,
@@ -129,13 +131,7 @@ mod tests {
         let fs: Arc<dyn FileSystem + Send + Sync> = Arc::new(RealFileSystem::new());
         let cache = BlockCache::new(1024 * 1024);
 
-        let compactor = LevelCompactor::new(
-            fs,
-            dir.path().to_path_buf(),
-            cache,
-            4096,
-            10,
-        );
+        let compactor = LevelCompactor::new(fs, dir.path().to_path_buf(), cache, 4096, 10);
 
         let task = CompactionTask {
             level: 0,
