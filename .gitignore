@@ -3,3 +3,7 @@
 Cargo.lock
 *.svg
 cargo-flamegraph.trace/
+.cargo/
+.DS_Store
+PLAN.md
+profile_writes.json
