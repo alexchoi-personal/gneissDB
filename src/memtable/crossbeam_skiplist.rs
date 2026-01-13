@@ -58,6 +58,7 @@ impl Memtable {
         buf.push(value_type as u8);
     }
 
+    #[allow(dead_code)]
     pub(crate) fn put_batch(&self, ops: &[(Bytes, SequenceNumber, Option<Bytes>)]) {
         if ops.is_empty() {
             return;
