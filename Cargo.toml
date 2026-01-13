@@ -1,0 +1,112 @@
+[package]
+name = "gneissdb"
+version = "0.1.0"
+edition = "2021"
+description = "A fast, LSM-tree based key-value store inspired by RocksDB"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/alexchoi-personal/gneissDB"
+keywords = ["database", "key-value", "lsm", "storage", "embedded"]
+categories = ["database-implementations"]
+
+[lib]
+name = "gneissdb"
+path = "src/lib.rs"
+
+[features]
+default = []
+io_uring = ["io-uring"]
+custom-memtable = []
+
+[dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "fs", "io-util", "time", "macros"] }
+bytes = "1"
+parking_lot = "0.12"
+crc32fast = "1"
+thiserror = "2"
+tracing = "0.1"
+async-trait = "0.1"
+memmap2 = "0.9"
+dashmap = "6"
+crossbeam-skiplist = "0.1.3"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+io-uring = { version = "0.7", optional = true }
+
+[dev-dependencies]
+tokio-test = "0.4"
+tempfile = "3"
+criterion = { version = "0.5", features = ["html_reports", "async_tokio"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+rand = "0.8"
+proptest = "1"
+rocksdb = "0.22"
+
+[[example]]
+name = "benchmark_comparison"
+path = "scripts/benchmark_comparison.rs"
+
+[[example]]
+name = "benchmark_memtable"
+path = "scripts/benchmark_memtable.rs"
+
+[[example]]
+name = "benchmark_iouring"
+path = "scripts/benchmark_iouring.rs"
+
+[[example]]
+name = "profile_target"
+path = "scripts/profile_target.rs"
+
+[[example]]
+name = "benchmark_concurrent"
+path = "scripts/benchmark_concurrent.rs"
+
+[[example]]
+name = "profile_writes"
+path = "scripts/profile_writes.rs"
+
+[[example]]
+name = "profile_detailed"
+path = "scripts/profile_detailed.rs"
+
+[[example]]
+name = "profile_breakdown"
+path = "scripts/profile_breakdown.rs"
+
+[[example]]
+name = "test_sstable_reads"
+path = "scripts/test_sstable_reads.rs"
+
+[[example]]
+name = "profile_writes_detailed"
+path = "scripts/profile_writes_detailed.rs"
+
+[[example]]
+name = "benchmark_realistic"
+path = "scripts/benchmark_realistic.rs"
+
+[[example]]
+name = "benchmark_comparison_full"
+path = "scripts/benchmark_comparison_full.rs"
+
+[[bench]]
+name = "memtable_bench"
+harness = false
+
+[[bench]]
+name = "sstable_bench"
+harness = false
+
+[[bench]]
+name = "write_bench"
+harness = false
+
+[[bench]]
+name = "read_bench"
+harness = false
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+debug = true
