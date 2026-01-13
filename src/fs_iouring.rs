@@ -27,7 +27,7 @@ impl IoUringContext {
             .setup_sqpoll(1000)
             .build(RING_SIZE)
             .or_else(|_| IoUring::new(RING_SIZE))
-            .map_err(|e| Error::Io(io::Error::new(io::ErrorKind::Other, e)))?;
+            .map_err(|e| Error::Io(io::Error::other(e)))?;
 
         Ok(Self {
             inner: Mutex::new(ring),
@@ -51,17 +51,17 @@ impl IoUringContext {
         unsafe {
             ring.submission()
                 .push(&write_op)
-                .map_err(|_| Error::Io(io::Error::new(io::ErrorKind::Other, "SQ full")))?;
+                .map_err(|_| Error::Io(io::Error::other("SQ full")))?;
         }
 
         ring.submit_and_wait(1)
-            .map_err(|e| Error::Io(io::Error::new(io::ErrorKind::Other, e)))?;
+            .map_err(|e| Error::Io(io::Error::other(e)))?;
 
         let cqe = loop {
             let cqe = ring
                 .completion()
                 .next()
-                .ok_or_else(|| Error::Io(io::Error::new(io::ErrorKind::Other, "No completion")))?;
+                .ok_or_else(|| Error::Io(io::Error::other("No completion")))?;
             if cqe.user_data() == user_data {
                 break cqe;
             }
@@ -87,17 +87,17 @@ impl IoUringContext {
         unsafe {
             ring.submission()
                 .push(&read_op)
-                .map_err(|_| Error::Io(io::Error::new(io::ErrorKind::Other, "SQ full")))?;
+                .map_err(|_| Error::Io(io::Error::other("SQ full")))?;
         }
 
         ring.submit_and_wait(1)
-            .map_err(|e| Error::Io(io::Error::new(io::ErrorKind::Other, e)))?;
+            .map_err(|e| Error::Io(io::Error::other(e)))?;
 
         let cqe = loop {
             let cqe = ring
                 .completion()
                 .next()
-                .ok_or_else(|| Error::Io(io::Error::new(io::ErrorKind::Other, "No completion")))?;
+                .ok_or_else(|| Error::Io(io::Error::other("No completion")))?;
             if cqe.user_data() == user_data {
                 break cqe;
             }
@@ -122,17 +122,17 @@ impl IoUringContext {
         unsafe {
             ring.submission()
                 .push(&fsync_op)
-                .map_err(|_| Error::Io(io::Error::new(io::ErrorKind::Other, "SQ full")))?;
+                .map_err(|_| Error::Io(io::Error::other("SQ full")))?;
         }
 
         ring.submit_and_wait(1)
-            .map_err(|e| Error::Io(io::Error::new(io::ErrorKind::Other, e)))?;
+            .map_err(|e| Error::Io(io::Error::other(e)))?;
 
         let cqe = loop {
             let cqe = ring
                 .completion()
                 .next()
-                .ok_or_else(|| Error::Io(io::Error::new(io::ErrorKind::Other, "No completion")))?;
+                .ok_or_else(|| Error::Io(io::Error::other("No completion")))?;
             if cqe.user_data() == user_data {
                 break cqe;
             }
@@ -158,17 +158,17 @@ impl IoUringContext {
         unsafe {
             ring.submission()
                 .push(&fsync_op)
-                .map_err(|_| Error::Io(io::Error::new(io::ErrorKind::Other, "SQ full")))?;
+                .map_err(|_| Error::Io(io::Error::other("SQ full")))?;
         }
 
         ring.submit_and_wait(1)
-            .map_err(|e| Error::Io(io::Error::new(io::ErrorKind::Other, e)))?;
+            .map_err(|e| Error::Io(io::Error::other(e)))?;
 
         let cqe = loop {
             let cqe = ring
                 .completion()
                 .next()
-                .ok_or_else(|| Error::Io(io::Error::new(io::ErrorKind::Other, "No completion")))?;
+                .ok_or_else(|| Error::Io(io::Error::other("No completion")))?;
             if cqe.user_data() == user_data {
                 break cqe;
             }
@@ -213,7 +213,11 @@ impl FileSystem for IoUringFileSystem {
     }
 
     async fn open_writable(&self, path: &Path) -> Result<Box<dyn WritableFile>> {
-        let file = OpenOptions::new().create(true).write(true).open(path)?;
+        let file = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(false)
+            .open(path)?;
         let offset = file.metadata()?.len();
         Ok(Box::new(IoUringWritableFile::with_offset(
             file,
