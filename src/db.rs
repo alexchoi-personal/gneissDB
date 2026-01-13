@@ -533,6 +533,11 @@ impl DbInner {
     }
 
     pub(crate) async fn flush(&self) -> Result<()> {
+        let old_wal_path = {
+            let wal_guard = self.wal.lock().await;
+            wal_guard.as_ref().map(|w| w.path().to_path_buf())
+        };
+
         let old_memtable = {
             let mut memtable_guard = self.memtable.write();
             let old = memtable_guard.clone();
@@ -592,6 +597,12 @@ impl DbInner {
             *self.wal.lock().await = Some(new_wal);
         }
 
+        if let Some(old_path) = old_wal_path {
+            if let Err(e) = self.fs.delete_file(&old_path).await {
+                tracing::warn!(path = %old_path.display(), error = %e, "Failed to delete old WAL");
+            }
+        }
+
         Ok(())
     }
 
@@ -602,6 +613,12 @@ impl DbInner {
         };
 
         if let Some(task) = task {
+            let files_to_delete: Vec<_> = task
+                .input_files
+                .iter()
+                .map(|f| self.path.join(format!("{:06}.sst", f.file_number)))
+                .collect();
+
             let file_number = self.version_set.read().next_file_number();
             let compactor = LevelCompactor::new(
                 self.fs.clone(),
@@ -613,6 +630,13 @@ impl DbInner {
 
             let edit = compactor.compact(&task, file_number).await?;
             self.version_set.write().apply(&edit);
+
+            for sst_path in files_to_delete {
+                self.table_cache.evict_by_path(&sst_path);
+                if let Err(e) = self.fs.delete_file(&sst_path).await {
+                    tracing::warn!(path = %sst_path.display(), error = %e, "Failed to delete old SST");
+                }
+            }
         }
 
         Ok(())
