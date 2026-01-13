@@ -120,6 +120,16 @@ let read_opts = ReadOptions::default();
 └────────────────────────────────────────────────┘
 ```
 
+## Development
+
+Set up git hooks:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+This enables pre-commit checks for formatting and linting.
+
 ## Benchmarks
 
 Run benchmarks against RocksDB:
