@@ -104,6 +104,11 @@ impl IndexBlock {
     pub(crate) fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
+
+    #[allow(dead_code)]
+    pub(crate) fn into_entries(self) -> Vec<IndexEntry> {
+        self.entries
+    }
 }
 
 #[cfg(test)]
