@@ -68,6 +68,27 @@ impl SstableBuilder {
         Ok(())
     }
 
+    pub(crate) async fn add_raw(&mut self, key: &[u8], value: &[u8]) -> Result<()> {
+        if self.first_key.is_none() {
+            self.first_key = Some(Bytes::copy_from_slice(key));
+        }
+        self.last_key = Some(Bytes::copy_from_slice(key));
+
+        if key.len() >= 9 {
+            let user_key = &key[..key.len() - 9];
+            self.bloom.add(user_key);
+        }
+
+        self.block_builder.add(key, value);
+        self.entry_count += 1;
+
+        if self.block_builder.estimated_size() >= self.block_size {
+            self.flush_block().await?;
+        }
+
+        Ok(())
+    }
+
     async fn flush_block(&mut self) -> Result<()> {
         if self.block_builder.is_empty() {
             return Ok(());

@@ -3,8 +3,8 @@ use crate::compaction::CompactionTask;
 use crate::error::Result;
 use crate::fs::FileSystem;
 use crate::manifest::VersionEdit;
-use crate::sstable::{SstableBuilder, SstableReader};
-use crate::types::InternalKey;
+use crate::sstable::{SstableBuilder, SstableIterator};
+use crate::types::{ParsedInternalKey, ValueType};
 use bytes::Bytes;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
@@ -42,18 +42,34 @@ impl LevelCompactor {
     ) -> Result<VersionEdit> {
         let mut edit = VersionEdit::new();
 
-        let mut readers = Vec::new();
+        if task.input_files.is_empty() {
+            return Ok(edit);
+        }
+
+        let mut iterators = Vec::with_capacity(task.input_files.len());
         for file in &task.input_files {
             let path = self.sst_path(file.file_number);
             let file_handle = self.fs.open_file(&path).await?;
-            let reader =
-                SstableReader::open(file_handle, file.file_number, self.cache.clone()).await?;
-            readers.push(reader);
+            let iter =
+                SstableIterator::open(file_handle, file.file_number, self.cache.clone()).await?;
+            iterators.push(iter);
+        }
+
+        let mut heap: BinaryHeap<MergeEntry> = BinaryHeap::new();
+
+        for (idx, iter) in iterators.iter_mut().enumerate() {
+            if let Some((key, value)) = iter.next().await? {
+                heap.push(MergeEntry {
+                    key,
+                    value,
+                    reader_index: idx,
+                });
+            }
         }
 
         let output_path = self.sst_path(next_file_number);
         let output_file = self.fs.create_file(&output_path).await?;
-        let builder = SstableBuilder::new(
+        let mut builder = SstableBuilder::new(
             output_file,
             output_path,
             self.block_size,
@@ -61,11 +77,39 @@ impl LevelCompactor {
             1000,
         );
 
-        let _heap: BinaryHeap<MergeEntry> = BinaryHeap::new();
-        let mut iterators: Vec<_> = Vec::new();
+        let mut last_user_key: Option<Bytes> = None;
 
-        for (idx, _reader) in readers.iter().enumerate() {
-            iterators.push(idx);
+        while let Some(entry) = heap.pop() {
+            let parsed = ParsedInternalKey::parse(&entry.key);
+
+            let should_write = if let Some(parsed) = &parsed {
+                match &last_user_key {
+                    Some(last) if last.as_ref() == parsed.user_key => false,
+                    _ => {
+                        if parsed.value_type == ValueType::Value {
+                            last_user_key = Some(Bytes::copy_from_slice(parsed.user_key));
+                            true
+                        } else {
+                            last_user_key = Some(Bytes::copy_from_slice(parsed.user_key));
+                            false
+                        }
+                    }
+                }
+            } else {
+                true
+            };
+
+            if should_write {
+                builder.add_raw(&entry.key, &entry.value).await?;
+            }
+
+            if let Some((next_key, next_value)) = iterators[entry.reader_index].next().await? {
+                heap.push(MergeEntry {
+                    key: next_key,
+                    value: next_value,
+                    reader_index: entry.reader_index,
+                });
+            }
         }
 
         let metadata = builder.finish().await?;
@@ -92,9 +136,8 @@ impl LevelCompactor {
     }
 }
 
-#[allow(dead_code)]
 struct MergeEntry {
-    key: InternalKey,
+    key: Bytes,
     value: Bytes,
     reader_index: usize,
 }
@@ -145,16 +188,16 @@ mod tests {
 
     #[test]
     fn test_merge_entry_ordering() {
-        use crate::types::ValueType;
+        use crate::types::InternalKey;
 
         let entry1 = MergeEntry {
-            key: InternalKey::new(Bytes::from("aaa"), 10, ValueType::Value),
+            key: InternalKey::new(Bytes::from("aaa"), 10, ValueType::Value).encode(),
             value: Bytes::from("v1"),
             reader_index: 0,
         };
 
         let entry2 = MergeEntry {
-            key: InternalKey::new(Bytes::from("bbb"), 10, ValueType::Value),
+            key: InternalKey::new(Bytes::from("bbb"), 10, ValueType::Value).encode(),
             value: Bytes::from("v2"),
             reader_index: 1,
         };
