@@ -1,11 +1,16 @@
-#[cfg(feature = "custom-memtable")]
+#[cfg(feature = "arena-memtable")]
+mod arena_skiplist;
+#[cfg(feature = "arena-memtable")]
+pub(crate) use arena_skiplist::ArenaMemtable as Memtable;
+
+#[cfg(all(feature = "custom-memtable", not(feature = "arena-memtable")))]
 mod skiplist;
-#[cfg(feature = "custom-memtable")]
+#[cfg(all(feature = "custom-memtable", not(feature = "arena-memtable")))]
 pub(crate) use skiplist::Memtable;
 
-#[cfg(not(feature = "custom-memtable"))]
+#[cfg(not(any(feature = "custom-memtable", feature = "arena-memtable")))]
 mod crossbeam_skiplist;
-#[cfg(not(feature = "custom-memtable"))]
+#[cfg(not(any(feature = "custom-memtable", feature = "arena-memtable")))]
 pub(crate) use crossbeam_skiplist::Memtable;
 
 use bytes::Bytes;

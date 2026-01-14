@@ -1000,7 +1000,7 @@ mod tests {
     #[tokio::test]
     async fn test_db_read_from_sstable() {
         let dir = tempdir().unwrap();
-        let options = Options::default().memtable_size(256);
+        let options = Options::default().memtable_size(64 * 1024);
         let db = DbInner::open(dir.path(), options).await.unwrap();
 
         for i in 0..50 {
@@ -1113,7 +1113,7 @@ mod tests {
         let path = dir.path().to_path_buf();
 
         {
-            let options = Options::default().memtable_size(256);
+            let options = Options::default().memtable_size(64 * 1024);
             let db = DbInner::open(&path, options).await.unwrap();
 
             for i in 0..50 {
@@ -1135,7 +1135,7 @@ mod tests {
         }
 
         {
-            let options = Options::default().memtable_size(256);
+            let options = Options::default().memtable_size(64 * 1024);
             let db = DbInner::open(&path, options).await.unwrap();
 
             let l0_files = db.version_set.read().current().num_files_at_level(0);
@@ -1167,7 +1167,7 @@ mod tests {
         let path = dir.path().to_path_buf();
 
         {
-            let options = Options::default().memtable_size(256);
+            let options = Options::default().memtable_size(64 * 1024);
             let db = DbInner::open(&path, options).await.unwrap();
 
             for batch in 0..3 {
@@ -1188,7 +1188,7 @@ mod tests {
         }
 
         {
-            let options = Options::default().memtable_size(256);
+            let options = Options::default().memtable_size(64 * 1024);
             let db = DbInner::open(&path, options).await.unwrap();
 
             for i in 0..90 {
@@ -1262,7 +1262,7 @@ mod tests {
     #[tokio::test]
     async fn test_db_scan_across_sstable() {
         let dir = tempdir().unwrap();
-        let options = Options::default().memtable_size(256);
+        let options = Options::default().memtable_size(64 * 1024);
         let db = DbInner::open(dir.path(), options).await.unwrap();
 
         for i in 0..50 {
@@ -1308,7 +1308,7 @@ mod tests {
     #[tokio::test]
     async fn test_db_scan_with_updates() {
         let dir = tempdir().unwrap();
-        let options = Options::default().memtable_size(256);
+        let options = Options::default().memtable_size(64 * 1024);
         let db = DbInner::open(dir.path(), options).await.unwrap();
 
         for i in 0..50 {
@@ -1361,7 +1361,7 @@ mod tests {
     #[tokio::test]
     async fn test_db_scan_with_deletes() {
         let dir = tempdir().unwrap();
-        let options = Options::default().memtable_size(256);
+        let options = Options::default().memtable_size(64 * 1024);
         let db = DbInner::open(dir.path(), options).await.unwrap();
 
         for i in 0..50 {

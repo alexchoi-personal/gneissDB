@@ -17,6 +17,7 @@ path = "src/lib.rs"
 default = []
 io_uring = ["io-uring"]
 custom-memtable = []
+arena-memtable = []
 
 [dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "fs", "io-util", "time", "macros"] }
