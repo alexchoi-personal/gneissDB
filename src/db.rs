@@ -8,7 +8,7 @@ use crate::group_commit::{GroupCommitQueue, WriteOp};
 use crate::manifest::{write_current, ManifestWriter, VersionEdit, VersionSet};
 use crate::memtable::{ImmutableMemtable, LookupResult, Memtable};
 use crate::options::{IoEngine, Options, ReadOptions, WriteOptions};
-use crate::sstable::SstableBuilder;
+use crate::sstable::{SstableBuilder, SstableHandleCache};
 use crate::table_cache::TableCache;
 use crate::wal::{BatchOp, WalReader, WalRecord, WalWriter};
 use crate::{WriteBatch, BATCH_TYPE_PUT};
@@ -30,6 +30,7 @@ pub(crate) struct DbInner {
     group_commit: Option<GroupCommitQueue>,
     cache: Arc<BlockCache>,
     table_cache: Arc<TableCache>,
+    handle_cache: Arc<SstableHandleCache>,
     #[allow(dead_code)]
     write_lock: Mutex<()>,
     compaction_picker: CompactionPicker,
@@ -93,6 +94,13 @@ impl DbInner {
             1000,
         ));
 
+        let handle_cache = Arc::new(SstableHandleCache::new(
+            fs.clone(),
+            path.to_path_buf(),
+            cache.clone(),
+            1000,
+        ));
+
         let mut db = Self {
             path: path.to_path_buf(),
             options: options.clone(),
@@ -105,6 +113,7 @@ impl DbInner {
             group_commit: None,
             cache,
             table_cache,
+            handle_cache,
             write_lock: Mutex::new(()),
             compaction_picker,
             shutdown: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -340,18 +349,11 @@ impl DbInner {
         let encoded_seek = seek_key.encode();
 
         for file in version.get_files_at_level(0) {
-            if let Ok(reader_file) = self
-                .fs
-                .open_file(&self.path.join(format!("{:06}.sst", file.file_number)))
-                .await
-            {
-                if let Ok(mut iter) =
-                    SstableIterator::open(reader_file, file.file_number, self.cache.clone()).await
-                {
-                    iter.seek(&encoded_seek).await?;
-                    merge_iter.add_sstable(iter, source_idx).await?;
-                    source_idx += 1;
-                }
+            if let Ok(handle) = self.handle_cache.get(file.file_number).await {
+                let mut iter = SstableIterator::from_handle(handle);
+                iter.seek(&encoded_seek).await?;
+                merge_iter.add_sstable(iter, source_idx).await?;
+                source_idx += 1;
             }
         }
 
@@ -372,19 +374,11 @@ impl DbInner {
                     continue;
                 }
 
-                if let Ok(reader_file) = self
-                    .fs
-                    .open_file(&self.path.join(format!("{:06}.sst", file.file_number)))
-                    .await
-                {
-                    if let Ok(mut iter) =
-                        SstableIterator::open(reader_file, file.file_number, self.cache.clone())
-                            .await
-                    {
-                        iter.seek(&encoded_seek).await?;
-                        merge_iter.add_sstable(iter, source_idx).await?;
-                        source_idx += 1;
-                    }
+                if let Ok(handle) = self.handle_cache.get(file.file_number).await {
+                    let mut iter = SstableIterator::from_handle(handle);
+                    iter.seek(&encoded_seek).await?;
+                    merge_iter.add_sstable(iter, source_idx).await?;
+                    source_idx += 1;
                 }
             }
         }

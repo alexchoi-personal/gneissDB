@@ -1,26 +1,23 @@
 use crate::cache::BlockCache;
 use crate::error::Result;
 use crate::fs::RandomAccessFile;
-use crate::sstable::{Block, Footer, IndexBlock, IndexEntry, FOOTER_SIZE};
+use crate::sstable::{
+    Block, BlockIterator, Footer, IndexBlock, IndexEntry, SstableHandle, FOOTER_SIZE,
+};
 use bytes::Bytes;
 use std::sync::Arc;
 
-#[allow(dead_code)]
 pub(crate) struct SstableIterator {
-    file: Box<dyn RandomAccessFile>,
+    handle: Option<Arc<SstableHandle>>,
+    file: Option<Box<dyn RandomAccessFile>>,
     cache: Arc<BlockCache>,
     file_number: u64,
     index_entries: Vec<IndexEntry>,
     current_block_idx: usize,
-    current_block: Option<BlockState>,
+    current_block: Option<Block>,
+    block_iter: Option<BlockIterator>,
 }
 
-#[allow(dead_code)]
-struct BlockState {
-    iter: std::vec::IntoIter<(Bytes, Bytes)>,
-}
-
-#[allow(dead_code)]
 impl SstableIterator {
     pub(crate) async fn open(
         file: Box<dyn RandomAccessFile>,
@@ -39,18 +36,34 @@ impl SstableIterator {
         let index = IndexBlock::decode(index_data)?;
 
         Ok(Self {
-            file,
+            handle: None,
+            file: Some(file),
             cache,
             file_number,
             index_entries: index.into_entries(),
             current_block_idx: 0,
             current_block: None,
+            block_iter: None,
         })
+    }
+
+    pub(crate) fn from_handle(handle: Arc<SstableHandle>) -> Self {
+        Self {
+            file_number: handle.file_number,
+            index_entries: handle.index_entries.clone(),
+            cache: BlockCache::new(0),
+            handle: Some(handle),
+            file: None,
+            current_block_idx: 0,
+            current_block: None,
+            block_iter: None,
+        }
     }
 
     pub(crate) async fn seek(&mut self, target: &[u8]) -> Result<()> {
         self.current_block_idx = 0;
         self.current_block = None;
+        self.block_iter = None;
 
         for (idx, entry) in self.index_entries.iter().enumerate() {
             if entry.last_key.as_ref() >= target {
@@ -62,20 +75,8 @@ impl SstableIterator {
         if self.current_block_idx < self.index_entries.len() {
             self.load_current_block().await?;
 
-            if let Some(ref mut state) = self.current_block {
-                let entries: Vec<_> = std::mem::take(&mut state.iter).collect();
-                let mut filtered = Vec::new();
-                let mut found_start = false;
-
-                for (k, v) in entries {
-                    if !found_start && k.as_ref() >= target {
-                        found_start = true;
-                    }
-                    if found_start {
-                        filtered.push((k, v));
-                    }
-                }
-                state.iter = filtered.into_iter();
+            if let Some(ref block) = self.current_block {
+                self.block_iter = Some(block.seek(target));
             }
         }
 
@@ -85,50 +86,59 @@ impl SstableIterator {
     async fn load_current_block(&mut self) -> Result<bool> {
         if self.current_block_idx >= self.index_entries.len() {
             self.current_block = None;
+            self.block_iter = None;
             return Ok(false);
         }
 
         let entry = &self.index_entries[self.current_block_idx];
         let block = self.read_block(entry.offset, entry.size as usize).await?;
 
-        let entries: Vec<_> = block.iter().collect();
-        self.current_block = Some(BlockState {
-            iter: entries.into_iter(),
-        });
+        self.block_iter = Some(block.iter());
+        self.current_block = Some(block);
 
         Ok(true)
     }
 
     async fn read_block(&self, offset: u64, size: usize) -> Result<Block> {
+        if let Some(ref handle) = self.handle {
+            return handle.read_block(offset, size).await;
+        }
+
         if let Some(data) = self.cache.get(self.file_number, offset) {
             return Ok(Block::new_unchecked(data));
         }
 
-        let data = self.file.read(offset, size).await?;
-        let block = Block::new(data.clone())?;
-        self.cache.insert(self.file_number, offset, data);
-        Ok(block)
+        if let Some(ref file) = self.file {
+            let data = file.read(offset, size).await?;
+            let block = Block::new(data.clone())?;
+            self.cache.insert(self.file_number, offset, data);
+            return Ok(block);
+        }
+
+        Err(crate::error::Error::Corruption("No file or handle".into()))
     }
 
     pub(crate) async fn next(&mut self) -> Result<Option<(Bytes, Bytes)>> {
         loop {
-            if self.current_block.is_none() && !self.load_current_block().await? {
+            if self.block_iter.is_none() && !self.load_current_block().await? {
                 return Ok(None);
             }
 
-            if let Some(ref mut state) = self.current_block {
-                if let Some(entry) = state.iter.next() {
+            if let Some(ref mut iter) = self.block_iter {
+                if let Some(entry) = iter.next() {
                     return Ok(Some(entry));
                 }
             }
 
             self.current_block_idx += 1;
             self.current_block = None;
+            self.block_iter = None;
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn is_valid(&self) -> bool {
-        self.current_block_idx < self.index_entries.len() || self.current_block.is_some()
+        self.current_block_idx < self.index_entries.len() || self.block_iter.is_some()
     }
 }
 
