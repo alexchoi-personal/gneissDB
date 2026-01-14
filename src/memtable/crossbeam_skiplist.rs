@@ -167,7 +167,6 @@ impl Memtable {
         self.skiplist.len()
     }
 
-    #[allow(dead_code)]
     pub(crate) fn scan_range(
         &self,
         start: &[u8],
@@ -175,48 +174,55 @@ impl Memtable {
         sequence: SequenceNumber,
         limit: usize,
     ) -> Vec<(Bytes, Bytes)> {
-        let mut results = Vec::with_capacity(limit.min(64));
+        let mut results = Vec::with_capacity(limit.min(128));
         let start_key = Bytes::copy_from_slice(start);
-        let mut last_user_key: Option<Vec<u8>> = None;
+        let mut last_user_key_len = 0usize;
+        let mut last_user_key_buf = [0u8; 256];
 
         for entry in self.skiplist.range(start_key..) {
             let encoded_key = entry.key();
-            if encoded_key.len() < 9 {
+            let key_len = encoded_key.len();
+            if key_len < 9 {
                 continue;
             }
 
-            let user_key_len = encoded_key.len() - 9;
+            let user_key_len = key_len - 9;
             let user_key = &encoded_key[..user_key_len];
 
             if user_key >= end {
                 break;
             }
 
-            if user_key < start {
+            if last_user_key_len > 0
+                && last_user_key_len == user_key_len
+                && &last_user_key_buf[..last_user_key_len] == user_key
+            {
                 continue;
-            }
-
-            if let Some(ref last) = last_user_key {
-                if last.as_slice() == user_key {
-                    continue;
-                }
             }
 
             let seq_bytes: [u8; 8] = encoded_key[user_key_len..user_key_len + 8]
                 .try_into()
                 .unwrap_or([0; 8]);
-            let inverted_seq = u64::from_be_bytes(seq_bytes);
-            let key_sequence = !inverted_seq;
-            let value_type = encoded_key[user_key_len + 8];
+            let key_sequence = !u64::from_be_bytes(seq_bytes);
 
             if key_sequence > sequence {
                 continue;
             }
 
-            last_user_key = Some(user_key.to_vec());
+            let value_type = encoded_key[key_len - 1];
+
+            if user_key_len <= 256 {
+                last_user_key_buf[..user_key_len].copy_from_slice(user_key);
+                last_user_key_len = user_key_len;
+            } else {
+                last_user_key_len = 0;
+            }
 
             if value_type == ValueType::Value as u8 {
-                results.push((Bytes::copy_from_slice(user_key), entry.value().clone()));
+                results.push((
+                    encoded_key[..user_key_len].to_vec().into(),
+                    entry.value().clone(),
+                ));
                 if results.len() >= limit {
                     break;
                 }

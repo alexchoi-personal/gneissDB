@@ -8,6 +8,7 @@ mod fs_iouring;
 mod group_commit;
 mod manifest;
 mod memtable;
+mod merge_iterator;
 mod options;
 mod sstable;
 mod table_cache;

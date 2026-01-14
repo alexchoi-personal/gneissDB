@@ -290,82 +290,52 @@ impl DbInner {
         end: &[u8],
         limit: usize,
     ) -> Result<Vec<(Bytes, Bytes)>> {
+        let sequence = self.version_set.read().last_sequence();
+        let version = self.version_set.read().current().clone();
+        let has_immutables = !self.immutable_memtables.lock().is_empty();
+        let has_sstables = (0..self.options.max_levels).any(|l| version.num_files_at_level(l) > 0);
+
+        if !has_immutables && !has_sstables {
+            let memtable = self.memtable.read().clone();
+            return Ok(memtable.scan_range(start, end, sequence, limit));
+        }
+
+        self.scan_with_merge(start, end, limit, sequence, &version)
+            .await
+    }
+
+    async fn scan_with_merge(
+        &self,
+        start: &[u8],
+        end: &[u8],
+        limit: usize,
+        sequence: u64,
+        version: &crate::manifest::Version,
+    ) -> Result<Vec<(Bytes, Bytes)>> {
+        use crate::merge_iterator::MergeIterator;
         use crate::sstable::SstableIterator;
         use crate::types::{InternalKey, ValueType};
-        use std::cmp::Reverse;
-        use std::collections::BinaryHeap;
 
-        let sequence = self.version_set.read().last_sequence();
-
-        #[derive(Eq, PartialEq)]
-        struct MergeEntry {
-            user_key: Bytes,
-            sequence: u64,
-            value_type: u8,
-            value: Bytes,
-            source_idx: usize,
-        }
-
-        impl Ord for MergeEntry {
-            fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-                match self.user_key.cmp(&other.user_key) {
-                    std::cmp::Ordering::Equal => other.sequence.cmp(&self.sequence),
-                    ord => ord,
-                }
-            }
-        }
-
-        impl PartialOrd for MergeEntry {
-            fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-                Some(self.cmp(other))
-            }
-        }
-
-        let mut heap: BinaryHeap<Reverse<MergeEntry>> = BinaryHeap::new();
+        let end_key = Bytes::copy_from_slice(end);
+        let mut merge_iter = MergeIterator::new(end_key, sequence);
+        let mut source_idx = 0;
 
         {
             let memtable = self.memtable.read().clone();
-            for (internal_key, value) in memtable.iter() {
-                if internal_key.user_key.as_ref() < start || internal_key.user_key.as_ref() >= end {
-                    continue;
-                }
-                if internal_key.sequence > sequence {
-                    continue;
-                }
-                heap.push(Reverse(MergeEntry {
-                    user_key: internal_key.user_key.clone(),
-                    sequence: internal_key.sequence,
-                    value_type: internal_key.value_type as u8,
-                    value,
-                    source_idx: 0,
-                }));
-            }
+            let entries: Vec<_> = memtable.iter().collect();
+            merge_iter.add_memtable_entries(entries, start, source_idx);
+            source_idx += 1;
         }
 
         {
             let immutables = self.immutable_memtables.lock();
-            for (idx, imm) in immutables.iter().enumerate() {
-                for (internal_key, value) in imm.inner().iter() {
-                    if internal_key.user_key.as_ref() < start
-                        || internal_key.user_key.as_ref() >= end
-                    {
-                        continue;
-                    }
-                    if internal_key.sequence > sequence {
-                        continue;
-                    }
-                    heap.push(Reverse(MergeEntry {
-                        user_key: internal_key.user_key.clone(),
-                        sequence: internal_key.sequence,
-                        value_type: internal_key.value_type as u8,
-                        value,
-                        source_idx: idx + 1,
-                    }));
-                }
+            for imm in immutables.iter() {
+                let entries: Vec<_> = imm.inner().iter().collect();
+                merge_iter.add_memtable_entries(entries, start, source_idx);
+                source_idx += 1;
             }
         }
 
-        let version = self.version_set.read().current().clone();
         let seek_key = InternalKey::new(Bytes::copy_from_slice(start), u64::MAX, ValueType::Value);
         let encoded_seek = seek_key.encode();
 
@@ -379,30 +349,8 @@ impl DbInner {
                     SstableIterator::open(reader_file, file.file_number, self.cache.clone()).await
                 {
                     iter.seek(&encoded_seek).await?;
-                    while let Some((key, value)) = iter.next().await? {
-                        if key.len() < 9 {
-                            continue;
-                        }
-                        let user_key = Bytes::copy_from_slice(&key[..key.len() - 9]);
-                        if user_key.as_ref() >= end {
-                            break;
-                        }
-                        let seq_bytes: [u8; 8] = key[key.len() - 9..key.len() - 1]
-                            .try_into()
-                            .unwrap_or([0; 8]);
-                        let key_seq = !u64::from_be_bytes(seq_bytes);
-                        if key_seq > sequence {
-                            continue;
-                        }
-                        let value_type = key[key.len() - 1];
-                        heap.push(Reverse(MergeEntry {
-                            user_key,
-                            sequence: key_seq,
-                            value_type,
-                            value,
-                            source_idx: 100 + file.file_number as usize,
-                        }));
-                    }
+                    merge_iter.add_sstable(iter, source_idx).await?;
+                    source_idx += 1;
                 }
             }
         }
@@ -434,51 +382,18 @@ impl DbInner {
                             .await
                     {
                         iter.seek(&encoded_seek).await?;
-                        while let Some((key, value)) = iter.next().await? {
-                            if key.len() < 9 {
-                                continue;
-                            }
-                            let user_key = Bytes::copy_from_slice(&key[..key.len() - 9]);
-                            if user_key.as_ref() >= end {
-                                break;
-                            }
-                            let seq_bytes: [u8; 8] = key[key.len() - 9..key.len() - 1]
-                                .try_into()
-                                .unwrap_or([0; 8]);
-                            let key_seq = !u64::from_be_bytes(seq_bytes);
-                            if key_seq > sequence {
-                                continue;
-                            }
-                            let value_type = key[key.len() - 1];
-                            heap.push(Reverse(MergeEntry {
-                                user_key,
-                                sequence: key_seq,
-                                value_type,
-                                value,
-                                source_idx: 1000 + level * 100 + file.file_number as usize,
-                            }));
-                        }
+                        merge_iter.add_sstable(iter, source_idx).await?;
+                        source_idx += 1;
                     }
                 }
             }
         }
 
         let mut results = Vec::with_capacity(limit.min(1024));
-        let mut last_user_key: Option<Bytes> = None;
-
-        while let Some(Reverse(entry)) = heap.pop() {
-            if let Some(ref last) = last_user_key {
-                if last == &entry.user_key {
-                    continue;
-                }
-            }
-            last_user_key = Some(entry.user_key.clone());
-
-            if entry.value_type == ValueType::Value as u8 {
-                results.push((entry.user_key, entry.value));
-                if results.len() >= limit {
-                    break;
-                }
+        while let Some((key, value)) = merge_iter.next().await? {
+            results.push((key, value));
+            if results.len() >= limit {
+                break;
             }
         }
 
