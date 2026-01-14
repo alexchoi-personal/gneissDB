@@ -617,7 +617,7 @@ async fn bench_range_scan() -> BenchResult {
         for i in 0..scan_count {
             let start_key = format!("key{:08}", (i * 7) % (count - scan_size));
             let end_key = format!("key{:08}", (i * 7) % (count - scan_size) + scan_size);
-            let results = db.scan(&start_key, &end_key, scan_size);
+            let results = db.scan(&start_key, &end_key, scan_size).await.unwrap();
             std::hint::black_box(results);
         }
         let elapsed = start.elapsed();

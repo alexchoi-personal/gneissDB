@@ -167,6 +167,7 @@ impl Memtable {
         self.skiplist.len()
     }
 
+    #[allow(dead_code)]
     pub(crate) fn scan_range(
         &self,
         start: &[u8],

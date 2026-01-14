@@ -106,13 +106,13 @@ impl Db {
         self.inner.write_batch_buffer(batch, options).await
     }
 
-    pub fn scan(
+    pub async fn scan(
         &self,
         start: impl AsRef<[u8]>,
         end: impl AsRef<[u8]>,
         limit: usize,
-    ) -> Vec<(Bytes, Bytes)> {
-        self.inner.scan(start.as_ref(), end.as_ref(), limit)
+    ) -> Result<Vec<(Bytes, Bytes)>> {
+        self.inner.scan(start.as_ref(), end.as_ref(), limit).await
     }
 
     pub async fn flush(&self) -> Result<()> {

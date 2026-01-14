@@ -387,6 +387,7 @@ impl LockFreeSkipList {
         }
     }
 
+    #[allow(dead_code)]
     fn seek_ge_ptr(&self, key: &[u8]) -> *mut Node {
         let mut pred = self.head.as_ref() as *const Node as *mut Node;
         let height = self.height.load(Ordering::Relaxed);
@@ -408,6 +409,7 @@ impl LockFreeSkipList {
         unsafe { (*pred).next[0].load(Ordering::SeqCst) }
     }
 
+    #[allow(dead_code)]
     fn range_iter<'a>(&'a self, start: &[u8]) -> RangeIter<'a> {
         RangeIter {
             current: self.seek_ge_ptr(start),
@@ -429,11 +431,13 @@ impl Drop for LockFreeSkipList {
     }
 }
 
+#[allow(dead_code)]
 struct RangeIter<'a> {
     current: *mut Node,
     _marker: std::marker::PhantomData<&'a LockFreeSkipList>,
 }
 
+#[allow(dead_code)]
 impl<'a> RangeIter<'a> {
     #[inline]
     fn next_ref(&mut self) -> Option<(&'a [u8], &'a [u8])> {
@@ -633,6 +637,7 @@ impl Memtable {
         self.skiplist.len()
     }
 
+    #[allow(dead_code)]
     pub(crate) fn scan_range(
         &self,
         start: &[u8],

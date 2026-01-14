@@ -284,10 +284,205 @@ impl DbInner {
         Ok(None)
     }
 
-    pub(crate) fn scan(&self, start: &[u8], end: &[u8], limit: usize) -> Vec<(Bytes, Bytes)> {
+    pub(crate) async fn scan(
+        &self,
+        start: &[u8],
+        end: &[u8],
+        limit: usize,
+    ) -> Result<Vec<(Bytes, Bytes)>> {
+        use crate::sstable::SstableIterator;
+        use crate::types::{InternalKey, ValueType};
+        use std::cmp::Reverse;
+        use std::collections::BinaryHeap;
+
         let sequence = self.version_set.read().last_sequence();
-        let memtable = self.memtable.read().clone();
-        memtable.scan_range(start, end, sequence, limit)
+
+        #[derive(Eq, PartialEq)]
+        struct MergeEntry {
+            user_key: Bytes,
+            sequence: u64,
+            value_type: u8,
+            value: Bytes,
+            source_idx: usize,
+        }
+
+        impl Ord for MergeEntry {
+            fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+                match self.user_key.cmp(&other.user_key) {
+                    std::cmp::Ordering::Equal => other.sequence.cmp(&self.sequence),
+                    ord => ord,
+                }
+            }
+        }
+
+        impl PartialOrd for MergeEntry {
+            fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+                Some(self.cmp(other))
+            }
+        }
+
+        let mut heap: BinaryHeap<Reverse<MergeEntry>> = BinaryHeap::new();
+
+        {
+            let memtable = self.memtable.read().clone();
+            for (internal_key, value) in memtable.iter() {
+                if internal_key.user_key.as_ref() < start || internal_key.user_key.as_ref() >= end {
+                    continue;
+                }
+                if internal_key.sequence > sequence {
+                    continue;
+                }
+                heap.push(Reverse(MergeEntry {
+                    user_key: internal_key.user_key.clone(),
+                    sequence: internal_key.sequence,
+                    value_type: internal_key.value_type as u8,
+                    value,
+                    source_idx: 0,
+                }));
+            }
+        }
+
+        {
+            let immutables = self.immutable_memtables.lock();
+            for (idx, imm) in immutables.iter().enumerate() {
+                for (internal_key, value) in imm.inner().iter() {
+                    if internal_key.user_key.as_ref() < start
+                        || internal_key.user_key.as_ref() >= end
+                    {
+                        continue;
+                    }
+                    if internal_key.sequence > sequence {
+                        continue;
+                    }
+                    heap.push(Reverse(MergeEntry {
+                        user_key: internal_key.user_key.clone(),
+                        sequence: internal_key.sequence,
+                        value_type: internal_key.value_type as u8,
+                        value,
+                        source_idx: idx + 1,
+                    }));
+                }
+            }
+        }
+
+        let version = self.version_set.read().current().clone();
+        let seek_key = InternalKey::new(Bytes::copy_from_slice(start), u64::MAX, ValueType::Value);
+        let encoded_seek = seek_key.encode();
+
+        for file in version.get_files_at_level(0) {
+            if let Ok(reader_file) = self
+                .fs
+                .open_file(&self.path.join(format!("{:06}.sst", file.file_number)))
+                .await
+            {
+                if let Ok(mut iter) =
+                    SstableIterator::open(reader_file, file.file_number, self.cache.clone()).await
+                {
+                    iter.seek(&encoded_seek).await?;
+                    while let Some((key, value)) = iter.next().await? {
+                        if key.len() < 9 {
+                            continue;
+                        }
+                        let user_key = Bytes::copy_from_slice(&key[..key.len() - 9]);
+                        if user_key.as_ref() >= end {
+                            break;
+                        }
+                        let seq_bytes: [u8; 8] = key[key.len() - 9..key.len() - 1]
+                            .try_into()
+                            .unwrap_or([0; 8]);
+                        let key_seq = !u64::from_be_bytes(seq_bytes);
+                        if key_seq > sequence {
+                            continue;
+                        }
+                        let value_type = key[key.len() - 1];
+                        heap.push(Reverse(MergeEntry {
+                            user_key,
+                            sequence: key_seq,
+                            value_type,
+                            value,
+                            source_idx: 100 + file.file_number as usize,
+                        }));
+                    }
+                }
+            }
+        }
+
+        for level in 1..self.options.max_levels {
+            for file in version.get_files_at_level(level) {
+                let min_user_key = if file.min_key.len() >= 9 {
+                    &file.min_key[..file.min_key.len() - 9]
+                } else {
+                    file.min_key.as_ref()
+                };
+                let max_user_key = if file.max_key.len() >= 9 {
+                    &file.max_key[..file.max_key.len() - 9]
+                } else {
+                    file.max_key.as_ref()
+                };
+
+                if end <= min_user_key || start > max_user_key {
+                    continue;
+                }
+
+                if let Ok(reader_file) = self
+                    .fs
+                    .open_file(&self.path.join(format!("{:06}.sst", file.file_number)))
+                    .await
+                {
+                    if let Ok(mut iter) =
+                        SstableIterator::open(reader_file, file.file_number, self.cache.clone())
+                            .await
+                    {
+                        iter.seek(&encoded_seek).await?;
+                        while let Some((key, value)) = iter.next().await? {
+                            if key.len() < 9 {
+                                continue;
+                            }
+                            let user_key = Bytes::copy_from_slice(&key[..key.len() - 9]);
+                            if user_key.as_ref() >= end {
+                                break;
+                            }
+                            let seq_bytes: [u8; 8] = key[key.len() - 9..key.len() - 1]
+                                .try_into()
+                                .unwrap_or([0; 8]);
+                            let key_seq = !u64::from_be_bytes(seq_bytes);
+                            if key_seq > sequence {
+                                continue;
+                            }
+                            let value_type = key[key.len() - 1];
+                            heap.push(Reverse(MergeEntry {
+                                user_key,
+                                sequence: key_seq,
+                                value_type,
+                                value,
+                                source_idx: 1000 + level * 100 + file.file_number as usize,
+                            }));
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut results = Vec::with_capacity(limit.min(1024));
+        let mut last_user_key: Option<Bytes> = None;
+
+        while let Some(Reverse(entry)) = heap.pop() {
+            if let Some(ref last) = last_user_key {
+                if last == &entry.user_key {
+                    continue;
+                }
+            }
+            last_user_key = Some(entry.user_key.clone());
+
+            if entry.value_type == ValueType::Value as u8 {
+                results.push((entry.user_key, entry.value));
+                if results.len() >= limit {
+                    break;
+                }
+            }
+        }
+
+        Ok(results)
     }
 
     pub(crate) async fn delete(&self, key: &[u8], options: WriteOptions) -> Result<()> {
@@ -1103,5 +1298,187 @@ mod tests {
 
             db.close().await.unwrap();
         }
+    }
+
+    #[tokio::test]
+    async fn test_db_scan_memtable_only() {
+        let dir = tempdir().unwrap();
+        let db = DbInner::open(dir.path(), Options::default()).await.unwrap();
+
+        for i in 0..100 {
+            db.put(
+                Bytes::from(format!("key{:04}", i)),
+                Bytes::from(format!("value{:04}", i)),
+                WriteOptions::default(),
+            )
+            .await
+            .unwrap();
+        }
+
+        let results = db.scan(b"key0020", b"key0030", 100).await.unwrap();
+        assert_eq!(results.len(), 10);
+        assert_eq!(results[0].0.as_ref(), b"key0020");
+        assert_eq!(results[9].0.as_ref(), b"key0029");
+
+        db.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_db_scan_with_limit() {
+        let dir = tempdir().unwrap();
+        let db = DbInner::open(dir.path(), Options::default()).await.unwrap();
+
+        for i in 0..100 {
+            db.put(
+                Bytes::from(format!("key{:04}", i)),
+                Bytes::from(format!("value{:04}", i)),
+                WriteOptions::default(),
+            )
+            .await
+            .unwrap();
+        }
+
+        let results = db.scan(b"key0000", b"key0100", 5).await.unwrap();
+        assert_eq!(results.len(), 5);
+
+        db.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_db_scan_across_sstable() {
+        let dir = tempdir().unwrap();
+        let options = Options::default().memtable_size(256);
+        let db = DbInner::open(dir.path(), options).await.unwrap();
+
+        for i in 0..50 {
+            db.put(
+                Bytes::from(format!("key{:04}", i)),
+                Bytes::from(format!("sst_value{:04}", i)),
+                WriteOptions::default(),
+            )
+            .await
+            .unwrap();
+        }
+        db.flush().await.unwrap();
+
+        for i in 50..100 {
+            db.put(
+                Bytes::from(format!("key{:04}", i)),
+                Bytes::from(format!("mem_value{:04}", i)),
+                WriteOptions::default(),
+            )
+            .await
+            .unwrap();
+        }
+
+        let results = db.scan(b"key0040", b"key0060", 100).await.unwrap();
+        assert_eq!(results.len(), 20);
+
+        for (i, (key, value)) in results.iter().enumerate() {
+            let expected_key = format!("key{:04}", 40 + i);
+            assert_eq!(key.as_ref(), expected_key.as_bytes());
+
+            if 40 + i < 50 {
+                let expected_value = format!("sst_value{:04}", 40 + i);
+                assert_eq!(value.as_ref(), expected_value.as_bytes());
+            } else {
+                let expected_value = format!("mem_value{:04}", 40 + i);
+                assert_eq!(value.as_ref(), expected_value.as_bytes());
+            }
+        }
+
+        db.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_db_scan_with_updates() {
+        let dir = tempdir().unwrap();
+        let options = Options::default().memtable_size(256);
+        let db = DbInner::open(dir.path(), options).await.unwrap();
+
+        for i in 0..50 {
+            db.put(
+                Bytes::from(format!("key{:04}", i)),
+                Bytes::from("old_value"),
+                WriteOptions::default(),
+            )
+            .await
+            .unwrap();
+        }
+        db.flush().await.unwrap();
+
+        for i in 20..30 {
+            db.put(
+                Bytes::from(format!("key{:04}", i)),
+                Bytes::from("new_value"),
+                WriteOptions::default(),
+            )
+            .await
+            .unwrap();
+        }
+
+        let results = db.scan(b"key0015", b"key0035", 100).await.unwrap();
+        assert_eq!(results.len(), 20);
+
+        for (key, value) in &results {
+            let key_str = std::str::from_utf8(key).unwrap();
+            let key_num: usize = key_str[3..].parse().unwrap();
+            if (20..30).contains(&key_num) {
+                assert_eq!(
+                    value.as_ref(),
+                    b"new_value",
+                    "Key {} should have new value",
+                    key_str
+                );
+            } else {
+                assert_eq!(
+                    value.as_ref(),
+                    b"old_value",
+                    "Key {} should have old value",
+                    key_str
+                );
+            }
+        }
+
+        db.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_db_scan_with_deletes() {
+        let dir = tempdir().unwrap();
+        let options = Options::default().memtable_size(256);
+        let db = DbInner::open(dir.path(), options).await.unwrap();
+
+        for i in 0..50 {
+            db.put(
+                Bytes::from(format!("key{:04}", i)),
+                Bytes::from(format!("value{:04}", i)),
+                WriteOptions::default(),
+            )
+            .await
+            .unwrap();
+        }
+        db.flush().await.unwrap();
+
+        for i in 20..30 {
+            db.delete(format!("key{:04}", i).as_bytes(), WriteOptions::default())
+                .await
+                .unwrap();
+        }
+
+        let results = db.scan(b"key0015", b"key0035", 100).await.unwrap();
+        assert_eq!(results.len(), 10);
+
+        for (key, _) in &results {
+            let key_str = std::str::from_utf8(key).unwrap();
+            let key_num: usize = key_str[3..].parse().unwrap();
+            assert!(
+                !(20..30).contains(&key_num),
+                "Deleted key {} should not appear",
+                key_str
+            );
+        }
+
+        db.close().await.unwrap();
     }
 }
