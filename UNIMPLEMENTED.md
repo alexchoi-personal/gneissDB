@@ -11,7 +11,7 @@ This document tracks implemented vs unimplemented features in GneissDB.
 ### Core Operations
 - [x] Put/Get/Delete operations
 - [x] WriteBatch for atomic batch writes
-- [x] Range scan (memtable only)
+- [x] Range scan (memtable + immutable memtables + SSTables)
 - [x] WAL write and recovery
 - [x] Group commit for sync writes
 
@@ -39,24 +39,7 @@ This document tracks implemented vs unimplemented features in GneissDB.
 
 ## ❌ NOT IMPLEMENTED
 
-### 1. Range Scan on SSTables (NOT IMPLEMENTED)
-**Location:** `src/db.rs:268`
-
-```rust
-pub(crate) fn scan(&self, start: &[u8], end: &[u8], limit: usize) -> Vec<(Bytes, Bytes)> {
-    // Only scans memtable!
-    let memtable = self.memtable.read().clone();
-    memtable.scan_range(start, end, sequence, limit)
-}
-```
-
-**Missing:**
-- Scan immutable memtables
-- Scan L0 SSTables
-- Scan leveled SSTables with key range filtering
-- Merge results across all sources
-
-### 7. Snapshots (NOT IMPLEMENTED)
+### 1. Snapshots (NOT IMPLEMENTED)
 **Location:** `src/options.rs`
 
 ```rust
@@ -129,14 +112,14 @@ No observability:
 
 ## Recommended Priority
 
-### P0 - Critical (Database doesn't work correctly without these)
-1. **Manifest persistence** - Without this, DB forgets state on restart
-2. **Compaction merge logic** - Without this, disk fills up forever
-3. **Old file cleanup** - WAL and SST files never deleted
+### P0 - Critical ✅ ALL COMPLETE
+1. ~~**Manifest persistence**~~ ✅ Implemented
+2. ~~**Compaction merge logic**~~ ✅ Implemented
+3. ~~**Old file cleanup**~~ ✅ Implemented
 
-### P1 - Important (Major functionality gaps)
-4. **SSTable iterator** - Needed for compaction and range scans
-5. **Range scan on SSTables** - Currently only scans memtable
+### P1 - Important ✅ MOSTLY COMPLETE
+4. ~~**SSTable iterator**~~ ✅ Implemented
+5. ~~**Range scan on SSTables**~~ ✅ Implemented
 6. **Background compaction** - Currently only manual
 
 ### P2 - Nice to Have
@@ -149,13 +132,13 @@ No observability:
 
 ## Estimated Effort
 
-| Feature | Effort | Dependencies |
-|---------|--------|--------------|
-| Manifest persistence | 2-3 days | None |
-| SSTable iterator | 1-2 days | None |
-| Compaction merge | 2-3 days | SSTable iterator |
-| Range scan on SST | 1 day | SSTable iterator |
-| File cleanup | 0.5 day | None |
-| Background compaction | 1-2 days | Compaction merge |
-| Compression | 1-2 days | None |
-| Snapshots | 2-3 days | None |
+| Feature | Effort | Status |
+|---------|--------|--------|
+| Manifest persistence | 2-3 days | ✅ Done |
+| SSTable iterator | 1-2 days | ✅ Done |
+| Compaction merge | 2-3 days | ✅ Done |
+| Range scan on SST | 1 day | ✅ Done |
+| File cleanup | 0.5 day | ✅ Done |
+| Background compaction | 1-2 days | Pending |
+| Compression | 1-2 days | Pending |
+| Snapshots | 2-3 days | Pending |
